@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "161414604855",
+    "project_id": "date-pdf",
+    "storage_bucket": "date-pdf.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:161414604855:android:002244138c54bdbc0337b2",
+        "android_client_info": {
+          "package_name": "com.example.date_pdf"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBsqS7MXy3PKwcoOqSWyH7RnR2oqSLvroU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

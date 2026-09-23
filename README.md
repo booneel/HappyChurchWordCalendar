@@ -1,102 +1,318 @@
 # The Word DatePDF 📖
 
-날짜를 기준으로 PDF의 해당 날짜 말씀을 자동으로 찾아 보여주는 모바일 앱입니다\.
-
-일반 사용자는 별도의 회원가입이나 로그인을 하지 않고 앱을 사용할 수 있으며, 관리자는 **설정 → 관리자 모드 → 승인코드**를 통해 관리자 기능에 접근할 수 있도록 설계했습니다\.
-
-현재는 Flutter \+ Firebase를 기반으로 개발하고 있으며, 향후 NAS를 자체 서버로 사용하는 구조로 확장할 수 있도록 서버 의존성을 분리하는 것을 목표로 합니다\.
+> **최종 기준 문서 — v7.1**
+>
+> 이 문서는 현재 프로젝트를 새 PC에서 다시 세팅하고, Firebase를 연결하고,
+> Android에서 실행하고, GitHub에 백업/업로드하는 데 필요한 내용을 한 곳에 정리한 문서입니다.
+>
+> 과거 README나 OCR/제목 자동추출 관련 문서와 내용이 충돌하면 **이 문서를 우선**합니다.
 
 ---
 
-## 📱 프로젝트 개요
+# 1. 프로젝트 개요
 
-이 프로젝트의 핵심 목적은 특정 날짜의 콘텐츠가 들어 있는 PDF를 사용자가 일일이 찾아보지 않아도 **오늘 날짜에 해당하는 PDF 페이지를 자동으로 찾아 바로 보여주는 것**입니다\.
+The Word DatePDF는 날짜를 기준으로 365일 묵상 PDF의 해당 페이지를 자동으로 열어주는 Flutter 앱입니다.
 
-예를 들어 현재 사용 중인 PDF가 다음과 같은 구조라면:
+사용자는 PDF 페이지 번호를 직접 찾지 않아도 됩니다.
+
+예:
 
 ```text
-2026년 1월 1일 → PDF 4페이지
-2026년 1월 2일 → PDF 5페이지
-2026년 1월 3일 → PDF 6페이지
+2026년 1월 1일   → PDF 4페이지
+2026년 1월 2일   → PDF 5페이지
 ...
-2026년 9월 23일 → PDF 269페이지
+2026년 9월 23일  → PDF 269페이지
 ...
 2026년 12월 31일 → PDF 368페이지
 ```
 
-앱에서 오늘 날짜를 확인한 후 해당 페이지를 자동으로 계산합니다\.
-
-따라서 사용자는 PDF에서 날짜를 직접 검색하거나 페이지를 찾아 이동할 필요가 없습니다\.
+앱에서는 날짜를 선택하면 자동으로 해당 페이지를 계산한 뒤 PDF를 엽니다.
 
 ---
 
-# ✨ 주요 기능
+# 2. 최종 방향
 
-## 1\. 홈 화면
+초기에는 PDF 안의 묵상 제목을 자동 OCR로 읽으려고 했지만,
+손글씨/캘리그라피/혼합 폰트 때문에 인식률과 속도가 안정적이지 않았습니다.
 
-홈 화면에서는 사용자가 앱을 실행했을 때 가장 필요한 정보를 한눈에 확인할 수 있도록 구성합니다\.
+따라서 **최종 버전에서는 제목 자동 추출을 사용하지 않습니다.**
 
-- 사용자 이름
-- 오늘 날짜
-- 오늘의 PDF
-- 오늘 날짜에 해당하는 PDF 페이지
-- 많이 방문한 페이지 TOP 3
-- 최근 본 페이지
-- 설정 진입
-
-예시:
+사용자 화면에서는 다음과 같이 단순하게 표시합니다.
 
 ```text
-┌──────────────────────────────┐
-│ 👤 사용자님                 ⚙️ │
-│ 2026년 9월 23일 (수)          │
-│                              │
-│ 오늘의 말씀                   │
-│ ┌──────────────────────────┐ │
-│ │ 📖 9월 23일               │ │
-│ │                          │ │
-│ │        [말씀 제목]      │ │
-│ │                          │ │
-│ │      [오늘 내용 보기]    │ │
-│ └──────────────────────────┘ │
-│                              │
-│ 🔥 많이 방문한 페이지         │
-│ 🥇 말씀 제목1 · 12회            │
-│ 🥈 말씀 제목2 · 9회             │
-│ 🥉 말씀 제목3 · 7회             │
-│                              │
-├──────────────────────────────┤
-│ 일정       🏠 홈       QnA   │
-└──────────────────────────────┘
+오늘의 말씀
+2026년 9월 23일 (수)
+
+오늘의 말씀을 확인해보세요.
+
+[오늘 말씀 보기]
+```
+
+찾아보기:
+
+```text
+오늘의 말씀
+2026년 9월 23일 (수)
+
+[보기]
+```
+
+많이 본 말씀:
+
+```text
+🥇
+말씀
+9월 23일
+12회
+```
+
+최근 본 말씀:
+
+```text
+오늘의 말씀
+2026년 9월 23일 (수)
+```
+
+즉 페이지 번호와 OCR 제목을 사용자에게 강조하지 않고
+**날짜 중심의 말씀 앱**으로 운영합니다.
+
+---
+
+# 3. 현재 주요 기능
+
+현재 프로젝트 기준 기능입니다.
+
+- Flutter Android 앱
+- Firebase 초기화
+- Firebase Storage PDF 연결
+- Firebase Firestore 연결
+- Firebase Storage PDF 로컬 캐시
+- `pdfrx` 실제 PDF Viewer
+- 날짜 → PDF 페이지 자동 계산
+- 오늘의 말씀 바로 열기
+- 날짜로 말씀 찾아보기
+- 한국어 날짜/달력
+- 사용자 이름 로컬 저장
+- 관리자 모드
+- 직접 클릭 조회수 기록
+- 많이 본 말씀 TOP 3
+- 최근 직접 열어본 말씀 기록
+- QnA UI
+- PDF 내부 스크롤은 조회수에서 제외
+
+---
+
+# 4. 최종 하단 메뉴
+
+```text
+🔎 찾아보기 | 🏠 홈 | 💬 QnA
+```
+
+과거의 `일정` 메뉴는 `찾아보기`로 변경했습니다.
+
+---
+
+# 5. 최종 관리자 센터
+
+제목/OCR 기능은 제거했으므로 관리자 화면에도 제목 관련 메뉴가 없습니다.
+
+현재 관리자 센터 방향:
+
+```text
+관리자 센터
+
+📄 PDF 관리
+📅 날짜 / 페이지 관리
+📊 방문 통계
+🕘 최근 이용 기록
+💬 QnA 관리
+```
+
+제거된 기능:
+
+```text
+제목 카탈로그 관리
+365개 제목 자동 생성
+OCR 제목 검수
+AI 제목 추출
 ```
 
 ---
 
-## 2\. 하단 네비게이션
+# 6. 프로젝트 경로
 
-앱의 주요 기능은 하단 탭으로 이동합니다\.
+현재 개발 경로 기준:
 
-### 📅 일정
+```text
+D:\my_portfolio\Date-Pdf
+```
 
-날짜를 선택하여 해당 날짜의 PDF 페이지를 확인합니다\.
+다른 PC에서는 경로가 달라도 됩니다.
 
-### 🏠 홈
-
-오늘 날짜의 PDF와 인기 페이지를 확인합니다\.
-
-### 💬 QnA
-
-자주 묻는 질문과 사용자의 질문을 관리하는 공간입니다\.
+다만 Windows에서 프로젝트가 `D:`에 있고 Flutter Pub Cache가 `C:`에 있을 경우
+Kotlin incremental cache 오류가 발생했던 이력이 있으므로
+뒤의 `PUB_CACHE` 설정을 반드시 참고하세요.
 
 ---
 
-# 📅 날짜 → PDF 페이지 자동 이동
-앞부분의 3페이지를 제외하고 PDF 4페이지부터 365일의 일일 콘텐츠가 시작하는 형태라고 가정하면\.
-
-현재 PDF 형식에서는 다음과 같은 규칙을 사용할 수 있습니다\.
+# 7. 권장 프로젝트 구조
 
 ```text
-PDF 페이지 = 해당 연도의 날짜 순번 + 앞부분 제외 페이지
+Date-Pdf/
+│
+├── android/
+│   ├── app/
+│   │   └── build.gradle.kts
+│   ├── build.gradle.kts
+│   └── gradle.properties
+│
+├── lib/
+│   ├── main.dart
+│   ├── firebase_options.dart
+│   │
+│   ├── screens/
+│   │   ├── app_shell.dart
+│   │   ├── home_page.dart
+│   │   ├── schedule_page.dart
+│   │   ├── pdf_page.dart
+│   │   ├── qna_page.dart
+│   │   ├── settings_page.dart
+│   │   ├── admin_code_page.dart
+│   │   └── admin_page.dart
+│   │
+│   └── services/
+│       ├── admin_service.dart
+│       ├── date_page_mapper.dart
+│       ├── local_profile_service.dart
+│       ├── pdf_cache_service.dart
+│       ├── pdf_repository.dart
+│       └── view_history_service.dart
+│
+├── pubspec.yaml
+├── README.md
+└── ...
+```
+
+---
+
+# 8. 더 이상 필요 없는 OCR/제목 파일
+
+최종 방향에서는 아래 파일은 필요하지 않습니다.
+
+```text
+lib/screens/admin_title_catalog_page.dart
+
+lib/services/pdf_title_service.dart
+lib/services/pdf_catalog_service.dart
+lib/services/pdf_catalog_builder_service.dart
+```
+
+프로젝트에 남아 있다면 먼저 import 여부를 확인합니다.
+
+PowerShell:
+
+```powershell
+cd D:\my_portfolio\Date-Pdf
+
+Get-ChildItem .\lib -Recurse -Filter *.dart |
+Select-String "pdf_title_service|pdf_catalog_service|pdf_catalog_builder_service|admin_title_catalog_page"
+```
+
+아무 결과가 없으면 삭제 가능합니다.
+
+---
+
+# 9. ML Kit 제거
+
+최종 버전에서는 제목 OCR을 사용하지 않습니다.
+
+따라서 설치되어 있다면 제거합니다.
+
+```powershell
+flutter pub remove google_mlkit_text_recognition
+```
+
+`android/app/build.gradle.kts`에 아래 줄이 남아 있다면 삭제합니다.
+
+```kotlin
+implementation("com.google.mlkit:text-recognition-korean:16.0.1")
+```
+
+---
+
+# 10. PDF 파일
+
+현재 Firebase Storage 기준 파일:
+
+```text
+365일 매일묵상말씀.pdf
+```
+
+Storage URI 예:
+
+```text
+gs://date-pdf.firebasestorage.app/365일 매일묵상말씀.pdf
+```
+
+코드에서는 일반적으로:
+
+```dart
+FirebaseStorage.instance.ref('365일 매일묵상말씀.pdf');
+```
+
+형태로 접근합니다.
+
+향후 더 관리하기 쉬운 구조는:
+
+```text
+pdf/current.pdf
+```
+
+처럼 고정 경로를 사용하는 것입니다.
+
+---
+
+# 11. PDF 페이지 구조
+
+현재 PDF:
+
+```text
+총 368페이지
+```
+
+구조:
+
+```text
+1~3페이지      앞부분
+4페이지         1월 1일
+5페이지         1월 2일
+...
+269페이지       9월 23일
+...
+368페이지       12월 31일
+```
+
+핵심 상수:
+
+```dart
+static const int dailyStartPdfPage = 4;
+static const int dailyPageCount = 365;
+```
+
+---
+
+# 12. 날짜 → PDF 페이지 계산
+
+담당 파일:
+
+```text
+lib/services/date_page_mapper.dart
+```
+
+개념:
+
+```text
+PDF 페이지 = 해당 연도의 날짜 순번 + 3
 ```
 
 예:
@@ -109,852 +325,1634 @@ PDF 페이지 = 해당 연도의 날짜 순번 + 앞부분 제외 페이지
 ```
 
 ```text
-2월 1일
-= 32번째 날
-= 32 + 3
-= PDF 35페이지
-```
-
-```text
 9월 23일
 = 266번째 날
 = 266 + 3
 = PDF 269페이지
 ```
 
-```text
-12월 31일
-= 365번째 날
-= 365 + 3
-= PDF 368페이지
-```
-
-이 기능은 `lib/services/date_page_mapper.dart`에서 담당합니다\.
+사용:
 
 ```dart
-DatePageMapper.pdfPageForDate(date);
+final page = DatePageMapper.pdfPageForDate(date);
 ```
 
-### 주의사항
+역변환:
 
-현재 매핑 방식은 **현재 PDF의 페이지 구조가 유지된다는 전제**에서 동작합니다\.
-
-새 PDF를 업로드했을 때:
-
-- 앞표지 페이지 수가 달라지는 경우
-- 일일 콘텐츠 시작 페이지가 달라지는 경우
-- 날짜 순서가 달라지는 경우
-- 2월 29일이 별도 페이지로 추가되는 윤년용 PDF인 경우
-
-페이지 매핑 방식을 별도로 설정해야 합니다\.
-
-따라서 최종 관리자 화면에서는 **일일 콘텐츠 시작 페이지를 관리자가 설정할 수 있도록 만드는 것**을 권장합니다\.
-
----
-
-# ⚙️ 설정
-
-설정 화면에서는 일반적인 앱 설정과 관리자 기능을 함께 제공합니다\.
-
-## 👤 사용자
-
-- 사용자 이름 변경
-
-현재는 회원가입/로그인 없이 이름을 기기에 저장하는 방식으로 설계합니다\.
-
-즉:
-
-```text
-이름
- ↓
-SharedPreferences
- ↓
-"사용자님"
-```
-
-처럼 동작합니다\.
-
-사용자 이름은 인증 목적이 아니라 앱에서 표시하기 위한 정보입니다\.
-
----
-
-## 🔔 알림
-
-향후 다음과 같은 알림 기능을 추가할 수 있습니다\.
-
-- PDF 업데이트 알림
-- QnA 답변 알림
-- 일정 변경 알림
-
-현재 프로젝트에서는 UI를 먼저 구성하고 실제 Push Notification 기능은 Firebase 연결 단계에서 추가할 수 있도록 설계합니다\.
-
----
-
-# 🔐 관리자 모드
-
-일반 사용자에게 관리자 기능을 노출하지 않으면서 별도의 일반 사용자 로그인 시스템을 만들지 않기 위해 다음 구조를 사용합니다\.
-
-```text
-설정
- ↓
-관리자 모드
- ↓
-승인코드 입력
- ↓
-관리자 인증
- ↓
-관리자 센터
-```
-
-관리자 인증이 성공해도 앱 전체의 UI가 별도의 앱처럼 바뀌지는 않습니다\.
-
-기존의:
-
-```text
-일정 | 홈 | QnA
-```
-
-구조는 유지하고,
-
-```text
-설정
- ↓
-관리자 모드
- ↓
-관리자 센터
-```
-
-에서 관리 기능을 이용하는 방식입니다\.
-
----
-
-# 🛠️ 관리자 센터
-
-관리자 센터에서는 다음 기능을 제공하는 것을 목표로 합니다\.
-
-## 📄 PDF 관리
-
-- 현재 PDF 확인
-- PDF 업로드
-- PDF 교체
-- PDF 버전 관리
-- 마지막 업데이트 날짜 확인
-
-관리자가 PDF를 교체하면 사용자는 앱을 다시 설치하지 않고 최신 PDF를 사용할 수 있도록 구성합니다\.
-
-예상 구조:
-
-```text
-관리자
- ↓
-새 PDF 선택
- ↓
-Firebase Storage 업로드
- ↓
-Firestore의 현재 PDF 정보 변경
- ↓
-사용자 앱에서 최신 PDF 조회
+```dart
+final date = DatePageMapper.dateForPdfPage(
+  page,
+  year: 2026,
+);
 ```
 
 ---
 
-## 📅 날짜 / 페이지 관리
+# 13. 윤년 주의
 
-현재 PDF 구조에서는 자동 계산이 가능하지만, PDF 형식이 변경될 가능성을 고려해 관리자 화면에서 매핑을 확인할 수 있도록 구성합니다\.
+현재 PDF는 365일 기준입니다.
+
+따라서 윤년 PDF에서 2월 29일이 별도 페이지로 포함되면
+현재 계산 방식과 맞지 않을 수 있습니다.
+
+현재 로직은 365일용 PDF 기준으로 유지합니다.
+
+윤년용 PDF를 실제로 운영하게 될 경우 별도 매핑 정책을 추가해야 합니다.
+
+---
+
+# 14. PDF Viewer 속도 구조
+
+초기 방식:
+
+```text
+PDF 버튼 클릭
+→ Firebase URL 요청
+→ 네트워크에서 PDF 열기
+→ 페이지 이동
+```
+
+이 방식은 느렸습니다.
+
+현재 권장 방식:
+
+```text
+앱 시작
+→ Firebase Storage PDF를 기기에 캐시
+→ 이후 로컬 PDF 사용
+→ PdfViewer.file()
+```
+
+담당 파일:
+
+```text
+lib/services/pdf_cache_service.dart
+```
+
+사용자는 두 번째 실행부터 훨씬 빠르게 PDF를 열 수 있습니다.
+
+---
+
+# 15. PDF 선로딩
+
+앱 홈 화면을 보는 동안 PDF를 미리 준비합니다.
+
+예:
+
+```dart
+PdfCacheService().preload();
+```
+
+따라서 사용자가 `오늘 말씀 보기`를 누른 시점에는
+이미 PDF가 로컬에 준비되어 있을 가능성이 높습니다.
+
+---
+
+# 16. Firebase PDF 변경 확인
+
+로컬 PDF가 있어도 Firebase의 PDF가 바뀌면 새 파일을 내려받아야 합니다.
+
+Firebase Storage의 `generation` 메타데이터를 비교하는 방식으로 운영합니다.
+
+```text
+Firebase generation
+vs
+로컬 저장 generation
+```
+
+같음:
+
+```text
+기존 로컬 PDF 사용
+```
+
+다름:
+
+```text
+새 PDF 다운로드
+```
+
+네트워크 확인을 너무 자주 하지 않도록 일정 시간 동안 메타데이터 체크를 생략할 수 있습니다.
+
+예:
+
+```dart
+Duration(hours: 6)
+```
+
+---
+
+# 17. 조회수 집계 정책
+
+매우 중요합니다.
+
+조회수는 **사용자가 말씀을 직접 눌러 PDF에 진입한 경우만** 올라갑니다.
+
+## 조회수 +1
 
 예:
 
 ```text
-일일 콘텐츠 시작 페이지
-[ 4 ]
-
-1월 1일  → 4페이지
-1월 2일  → 5페이지
-1월 3일  → 6페이지
-...
-12월 31일 → 368페이지
+홈 → 오늘 말씀 보기
+찾아보기 → 보기
+많이 본 말씀 카드 직접 클릭
+최근 본 말씀 직접 클릭
 ```
 
-필요한 경우 관리자가 특정 날짜의 페이지를 직접 수정할 수 있도록 확장할 수 있습니다\.
+## 조회수 증가 안 함
+
+```text
+PDF 안에서 손가락으로 스크롤
+스크롤해서 다른 페이지가 보임
+PdfViewer의 onPageChanged
+PDF 내부 이전 버튼
+PDF 내부 다음 버튼
+```
+
+즉:
+
+```text
+"스크롤 중 우연히 지나간 페이지"
+```
+
+는 조회수에 포함하지 않습니다.
 
 ---
 
-## 📊 방문 통계
-
-사용자가 PDF 페이지를 열면 해당 페이지의 조회수를 기록합니다\.
+# 18. 조회수 Firestore 구조
 
 예:
 
 ```text
 page_stats
-
-23페이지 → 13회
-45페이지 → 9회
-78페이지 → 7회
+└── 269
+    ├── page: 269
+    ├── views: 12
+    ├── countType: "direct_open_only"
+    └── lastDirectOpenedAt: Timestamp
 ```
 
-홈 화면에는:
+담당 서비스:
 
 ```text
-🥇 23페이지
-🥈 45페이지
-🥉 78페이지
+lib/services/view_history_service.dart
 ```
 
-형태로 TOP 3를 표시합니다\.
+직접 진입할 때:
 
-관리자 화면에서는 향후:
-
-- 전체 페이지 조회수
-- 날짜별 조회수
-- 인기 페이지
-- 최근 조회 페이지
-- 사용자별 통계
-
-등으로 확장할 수 있습니다\.
-
----
-
-# 💬 QnA
-
-QnA 화면은 사용자가 앱 사용 중 궁금한 내용을 확인하거나 질문할 수 있도록 구성합니다\.
-
-기본 기능:
-
-- 질문 검색
-- 자주 묻는 질문
-- 질문 작성
-- 답변 확인
-
-관리자 기능:
-
-- 질문 확인
-- 답변 작성
-- FAQ 등록
-- FAQ 수정
-- FAQ 삭제
-
----
-
-# 🏗️ 프로젝트 구조
-
-현재 프로젝트는 기능별로 파일을 나누어 유지보수하기 쉽게 구성합니다\.
-
-```text
-date_pdf/
-│
-├── android/
-├── ios/
-│
-├── lib/
-│   │
-│   ├── main.dart
-│   │
-│   ├── models/
-│   │
-│   ├── services/
-│   │   ├── admin_service.dart
-│   │   ├── date_page_mapper.dart
-│   │   ├── local_profile_service.dart
-│   │   └── pdf_repository.dart
-│   │
-│   └── screens/
-│       ├── app_shell.dart
-│       ├── home_page.dart
-│       ├── schedule_page.dart
-│       ├── qna_page.dart
-│       ├── pdf_page.dart
-│       ├── settings_page.dart
-│       ├── admin_code_page.dart
-│       └── admin_page.dart
-│
-├── pubspec.yaml
-├── README.md
-└── firebase_options.dart
+```dart
+history.recordDirectOpen(
+  page: page,
+  date: date,
+);
 ```
 
----
-
-# 🔥 Firebase 구성
-
-현재 개발 단계에서는 Firebase를 백엔드로 사용합니다\.
-
-## Firebase 서비스
-
-### Firebase Firestore
-
-앱의 구조화된 데이터를 저장합니다\.
-
-예상 구조:
-
-```text
-pdf_documents/
-└── current
-    ├── pdfUrl
-    ├── version
-    └── updatedAt
-
-pdf_pages/
-├── 2026-01-01
-├── 2026-01-02
-├── 2026-01-03
-└── ...
-
-page_stats/
-├── 1
-├── 2
-├── 3
-└── ...
-
-qna/
-├── question-001
-├── question-002
-└── ...
-```
+를 호출합니다.
 
 ---
 
-## Firebase Storage
+# 19. 최근 본 말씀
 
-PDF 파일 자체는 Firebase Storage에 저장합니다\.
+최근 본 말씀도 `직접 진입`만 기록합니다.
+
+PDF에서 스크롤하다 지나간 페이지는 최근 기록에 들어가지 않습니다.
+
+현재 최근 기록은 기기 로컬 `SharedPreferences`를 사용할 수 있습니다.
 
 예:
 
 ```text
-pdf/
-└── current/
-    └── document.pdf
+오늘의 말씀
+2026년 9월 23일 (수)
 ```
-
-관리자가 PDF를 교체하면 새로운 PDF를 Storage에 업로드하고 Firestore의 현재 PDF 정보를 변경합니다\.
 
 ---
 
-# 🔒 Firebase 보안
+# 20. 많이 본 말씀
 
-실제 배포 전에는 반드시 Firebase Security Rules를 설정해야 합니다\.
+Firestore `page_stats`에서 직접 클릭 수가 높은 페이지를 가져옵니다.
 
-특히 다음 기능은 일반 사용자에게 쓰기 권한을 주면 안 됩니다\.
+표시:
 
 ```text
-PDF 업로드
-PDF 삭제
-PDF 교체
-관리자 설정
-QnA 답변
-관리자 데이터 수정
+🥇
+말씀
+9월 23일
+12회
 ```
 
-일반 사용자는 필요한 데이터만 읽을 수 있도록 하고 관리자 작업은 서버 측에서 검증하는 것을 목표로 합니다\.
+즉:
+
+```text
+순위
+고정 표시 "말씀"
+날짜
+직접 클릭 조회수
+```
+
+구조입니다.
 
 ---
 
-# 🔑 관리자 승인코드 보안
+# 21. 사용자 이름
 
-현재 프로젝트의 관리자 승인코드는 **개발용 프로토타입**입니다\.
+일반 사용자는 별도의 회원가입 없이 사용할 수 있습니다.
 
-실제 서비스에서는 승인코드를 Flutter 코드에 하드코딩하면 안 됩니다\.
+사용자 이름은 표시용입니다.
 
-잘못된 예:
-
-```dart
-const adminCode = "123456";
+```text
+사용자 이름
+↓
+SharedPreferences
+↓
+"사용자님"
 ```
 
-Flutter 앱은 사용자의 기기에 설치되기 때문에 앱을 분석하면 코드가 노출될 가능성이 있습니다\.
+인증용 데이터가 아닙니다.
 
-## 권장 구조
+---
+
+# 22. 관리자 모드
+
+흐름:
+
+```text
+설정
+↓
+관리자 모드
+↓
+승인코드 입력
+↓
+관리자 센터
+```
+
+현재 승인코드 방식은 개발용 프로토타입입니다.
+
+실제 서비스에서 관리자 비밀번호/승인코드를 앱 코드에 하드코딩하면 안 됩니다.
+
+최종 서비스에서는:
 
 ```text
 Flutter
-   │
-   │ 승인코드
-   ▼
-Firebase Cloud Function
-   │
-   │ 서버에서 승인코드 검증
-   ▼
-관리자 인증
-   │
-   ▼
-관리자 기능 사용
+↓
+서버 / Cloud Function
+↓
+승인코드 검증
+↓
+Firebase Auth / Custom Claims
+↓
+관리자 권한
 ```
 
-향후 Firebase Authentication과 Custom Claims 또는 서버 측 세션/토큰을 이용하여 관리자 권한을 관리하는 방식으로 개선합니다\.
+방식을 권장합니다.
 
 ---
 
-# 📦 현재 사용 패키지
+# 23. 한국어 날짜 설정
 
-주요 패키지:
+과거 다음 오류가 있었습니다.
+
+```text
+LocaleDataException:
+Locale data has not been initialized
+```
+
+`main.dart`에서 반드시:
+
+```dart
+import 'package:intl/date_symbol_data_local.dart';
+```
+
+그리고 Firebase 초기화 전에:
+
+```dart
+await initializeDateFormatting('ko_KR', null);
+```
+
+를 실행합니다.
+
+---
+
+# 24. 한국어 달력
+
+`CalendarDatePicker`를 한국어로 표시하려면
+`MaterialApp`에 locale 설정이 필요합니다.
+
+```dart
+locale: const Locale('ko', 'KR'),
+
+supportedLocales: const [
+  Locale('ko', 'KR'),
+],
+
+localizationsDelegates: const [
+  GlobalMaterialLocalizations.delegate,
+  GlobalWidgetsLocalizations.delegate,
+  GlobalCupertinoLocalizations.delegate,
+],
+```
+
+필요 import:
+
+```dart
+import 'package:flutter_localizations/flutter_localizations.dart';
+```
+
+---
+
+# 25. 현재 주요 Flutter 패키지
+
+최종 방향 기준 예:
 
 ```yaml
 dependencies:
   flutter:
     sdk: flutter
 
+  flutter_localizations:
+    sdk: flutter
+
   firebase_core:
-  cloud_firestore:
-  firebase_storage:
   firebase_auth:
-  file_picker:
+  firebase_storage:
+  cloud_firestore:
+
   shared_preferences:
   intl:
+  pdfrx:
+  path_provider:
+  file_picker:
 ```
 
-실제 PDF 렌더링 기능을 구현할 때는 PDF Viewer 패키지를 추가합니다\.
+프로젝트 실제 `pubspec.yaml`이 최종 기준입니다.
+
+---
+
+# 26. 새 PC 세팅 — Flutter
+
+Flutter 설치 후:
+
+```powershell
+flutter --version
+flutter doctor -v
+```
+
+Android 관련 항목에 치명적인 오류가 없는지 확인합니다.
+
+---
+
+# 27. JDK 17
+
+현재 프로젝트는 JDK 17 사용을 권장합니다.
+
+설치:
+
+```powershell
+winget install EclipseAdoptium.Temurin.17.JDK
+```
+
+설치 후 PowerShell을 새로 열고:
+
+```powershell
+java -version
+```
+
+정상 예:
+
+```text
+openjdk version "17..."
+```
+
+---
+
+# 28. JAVA_HOME
+
+주의:
+
+`JAVA_HOME`에는 `java.exe`까지 넣지 않습니다.
+
+잘못된 예:
+
+```text
+C:\Program Files\Eclipse Adoptium\jdk-17...\bin\java.exe
+```
+
+정상:
+
+```text
+C:\Program Files\Eclipse Adoptium\jdk-17...
+```
 
 예:
 
-- `pdfrx`
-- `pdfx`
-- `syncfusion_flutter_pdfviewer`
-
-프로젝트의 라이선스 및 기능 요구사항을 확인한 후 하나를 선택합니다\.
-
----
-
-# 🚀 개발 환경 설정
-
-## 1\. Flutter 확인
-
-```bash
-flutter doctor
+```powershell
+$env:JAVA_HOME="C:\Program Files\Eclipse Adoptium\jdk-17.0.20.101-hotspot"
+$env:Path="$env:JAVA_HOME\bin;$env:Path"
 ```
 
-필요한 개발 환경이 정상적으로 설치되어 있는지 확인합니다\.
+Flutter에도 지정:
 
----
+```powershell
+flutter config --jdk-dir "C:\Program Files\Eclipse Adoptium\jdk-17.0.20.101-hotspot"
+```
 
-## 2\. 프로젝트 다운로드
+확인:
 
-```bash
-git clone <YOUR_REPOSITORY_URL>
-cd date_pdf
+```powershell
+flutter doctor -v
 ```
 
 ---
 
-## 3\. 패키지 설치
+# 29. Android SDK / NDK
 
-```bash
+과거 오류:
+
+```text
+Package ndk not found.
+Package 28.2.13676358 not found.
+```
+
+프로젝트에서 사용했던 NDK:
+
+```text
+28.2.13676358
+```
+
+Android Studio:
+
+```text
+Tools
+→ SDK Manager
+→ SDK Tools
+→ Show Package Details
+→ NDK (Side by side)
+→ 28.2.13676358
+```
+
+같이 설치 권장:
+
+```text
+Android SDK Command-line Tools
+Android SDK Build-Tools
+CMake
+NDK (Side by side)
+```
+
+확인:
+
+```powershell
+Get-ChildItem "$env:LOCALAPPDATA\Android\sdk\ndk"
+```
+
+---
+
+# 30. 중요 — D: 프로젝트 / C: Pub Cache 오류
+
+실제로 발생했던 오류:
+
+```text
+Could not close incremental caches
+```
+
+```text
+this and base files have different roots
+```
+
+원인:
+
+```text
+프로젝트
+D:\my_portfolio\Date-Pdf
+
+Flutter Pub Cache
+C:\Users\...\AppData\Local\Pub\Cache
+```
+
+처럼 서로 다른 드라이브였습니다.
+
+---
+
+# 31. PUB_CACHE를 D:로 이동
+
+폴더 생성:
+
+```powershell
+New-Item -ItemType Directory -Force "D:\PubCache"
+```
+
+현재 PowerShell:
+
+```powershell
+$env:PUB_CACHE="D:\PubCache"
+```
+
+영구 설정:
+
+```powershell
+[Environment]::SetEnvironmentVariable(
+    "PUB_CACHE",
+    "D:\PubCache",
+    "User"
+)
+```
+
+PowerShell을 새로 연 뒤 확인:
+
+```powershell
+echo $env:PUB_CACHE
+```
+
+정상:
+
+```text
+D:\PubCache
+```
+
+---
+
+# 32. Pub Cache 변경 후 캐시 삭제
+
+```powershell
+cd D:\my_portfolio\Date-Pdf
+```
+
+Gradle daemon 종료:
+
+```powershell
+cd android
+.\gradlew --stop
+cd ..
+```
+
+캐시 삭제:
+
+```powershell
+flutter clean
+
+Remove-Item -Recurse -Force build -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force .dart_tool -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force android\.gradle -ErrorAction SilentlyContinue
+```
+
+다시:
+
+```powershell
 flutter pub get
 ```
 
----
+확인:
 
-## 4\. Firebase 연결
-
-Firebase CLI와 FlutterFire CLI를 설치한 후:
-
-```bash
-firebase login
+```powershell
+Select-String -Path ".dart_tool\package_config.json" -Pattern "D:/PubCache"
 ```
 
-```bash
+---
+
+# 33. Kotlin cache 대응
+
+필요 시:
+
+```text
+android/gradle.properties
+```
+
+에:
+
+```properties
+kotlin.incremental=false
+kotlin.compiler.execution.strategy=in-process
+```
+
+를 사용할 수 있습니다.
+
+단, C:/D: 드라이브 충돌이 원인이라면 먼저 `PUB_CACHE`를 해결해야 합니다.
+
+---
+
+# 34. Firebase 연결
+
+FlutterFire CLI:
+
+```powershell
 dart pub global activate flutterfire_cli
 ```
 
-그리고:
+Firebase CLI 로그인:
 
-```bash
+```powershell
+firebase login
+```
+
+프로젝트 루트:
+
+```powershell
+cd D:\my_portfolio\Date-Pdf
+```
+
+설정:
+
+```powershell
 flutterfire configure
 ```
 
-를 실행합니다\.
+Firebase 프로젝트:
 
-그러면 플랫폼별 Firebase 설정을 기반으로:
+```text
+date-pdf
+```
+
+Android를 반드시 포함합니다.
+
+---
+
+# 35. firebase_options.dart
+
+`flutterfire configure`가 완료되면:
 
 ```text
 lib/firebase_options.dart
 ```
 
-파일이 생성됩니다\.
+가 생성/갱신됩니다.
+
+Windows에서 Flutter 앱을 실행할 경우 Windows 설정도 선택해야 합니다.
+
+Android만 사용할 경우 Android 디바이스에서 실행하면 됩니다.
 
 ---
 
-## 5\. 실행
+# 36. Firestore 데이터베이스 생성
 
-Android:
-
-```bash
-flutter run
-```
-
-iOS:
-
-```bash
-flutter run
-```
-
-iOS 개발 및 배포에는 macOS와 Xcode가 필요합니다\.
-
----
-
-# 🧪 테스트 계획
-
-## 날짜 매핑 테스트
-
-최소한 다음 날짜를 테스트합니다\.
+실제로 발생했던 오류:
 
 ```text
-2026-01-01 → PDF 4
-2026-02-01 → PDF 35
-2026-04-03 → PDF 96
-2026-09-23 → PDF 269
-2026-12-31 → PDF 368
+The database (default) does not exist for project date-pdf
 ```
 
-## 앱 기능 테스트
+해결:
 
-- [ ] 첫 실행
-- [ ] 사용자 이름 설정
-- [ ] 이름 변경
-- [ ] 오늘 날짜 표시
-- [ ] 오늘 PDF 페이지 계산
-- [ ] 날짜 선택
-- [ ] 해당 PDF 페이지 이동
-- [ ] 이전/다음 페이지 이동
-- [ ] PDF 열기
-- [ ] 최근 본 페이지
-- [ ] 인기 페이지 TOP 3
-- [ ] QnA 검색
-- [ ] QnA 작성
-- [ ] 관리자 승인코드
-- [ ] 관리자 모드 진입
-- [ ] 관리자 모드 종료
-- [ ] PDF 업로드
-- [ ] PDF 교체
-- [ ] 날짜/페이지 확인
-- [ ] 방문 통계
-- [ ] Firebase Security Rules
-
----
-
-# 👥 배포 계획
-
-이 앱은 초기에는 약 10명 정도의 제한된 사용자에게 배포하는 것을 목표로 합니다\.
-
-## Android
-
-Google Play Console의 \*\*비공개 테스트&#40;Closed Testing&#41;\*\*를 이용하는 방식을 권장합니다\.
-
-빌드:
-
-```bash
-flutter build appbundle --release
-```
-
-생성된 Android App Bundle을 Google Play Console에 업로드하고 테스트 사용자만 초대합니다\.
-
----
-
-## iPhone
-
-iOS는 **TestFlight**를 이용하는 방식이 적합합니다\.
-
-일반적인 흐름:
+Firebase Console:
 
 ```text
-Flutter
- ↓
-Xcode
- ↓
-Archive
- ↓
-App Store Connect
- ↓
-TestFlight
- ↓
-테스트 사용자 초대
+date-pdf
+→ Build
+→ Firestore Database
+→ Create database
 ```
 
-iOS 배포에는 Apple Developer 계정과 macOS/Xcode 환경이 필요합니다\.
+반드시 `(default)` Firestore database를 생성합니다.
+
+현재 코드:
+
+```dart
+FirebaseFirestore.instance
+```
+
+는 `(default)` DB를 사용합니다.
 
 ---
 
-# 🗺️ 개발 로드맵
+# 37. Firestore Rules
 
-## Phase 1 — UI 프로토타입
+개발 중에는 테스트 규칙을 사용할 수 있지만
+실제 배포 전에 반드시 보안 규칙을 정리해야 합니다.
 
-- [x] 홈 화면
-- [x] 일정 화면
-- [x] QnA 화면
-- [x] 설정 화면
-- [x] 관리자 모드 UI
-- [x] 관리자 센터 UI
-- [x] 날짜 → 페이지 계산 로직
-
----
-
-## Phase 2 — Firebase 연결
-
-- [ ] Firebase 프로젝트 생성
-- [ ] Firestore 연결
-- [ ] Firebase Storage 연결
-- [ ] 실제 PDF 업로드
-- [ ] PDF URL 관리
-- [ ] 사용자 앱에서 PDF 조회
-
----
-
-## Phase 3 — 실제 PDF Viewer
-
-- [ ] PDF Viewer 패키지 선택
-- [ ] Firebase Storage PDF 연결
-- [ ] 페이지 이동
-- [ ] 날짜별 자동 페이지 이동
-- [ ] 이전/다음 날짜 이동
-- [ ] 최근 본 페이지 저장
-
----
-
-## Phase 4 — 관리자 기능
-
-- [ ] 관리자 승인코드 서버 검증
-- [ ] 관리자 인증 상태 관리
-- [ ] PDF 업로드
-- [ ] PDF 교체
-- [ ] PDF 버전 관리
-- [ ] 날짜/페이지 매핑 관리
-
----
-
-## Phase 5 — 통계 / QnA
-
-- [ ] 페이지 조회수 저장
-- [ ] 인기 페이지 TOP 3
-- [ ] 관리자 통계
-- [ ] QnA 작성
-- [ ] QnA 답변
-- [ ] FAQ
-
----
-
-## Phase 6 — 보안
-
-- [ ] Firestore Security Rules
-- [ ] Storage Security Rules
-- [ ] 관리자 서버 인증
-- [ ] 승인코드 서버 검증
-- [ ] API/데이터 접근 권한 분리
-- [ ] 관리자 세션 관리
-
----
-
-## Phase 7 — 제한 배포
-
-- [ ] Android 내부/비공개 테스트
-- [ ] iOS TestFlight
-- [ ] 약 10명 사용자 테스트
-- [ ] 버그 수정
-- [ ] 사용성 개선
-
----
-
-# 🖥️ 향후 NAS 서버 전환
-
-현재는 Firebase를 사용하지만 향후 NAS를 서버로 사용할 수 있도록 구조를 분리하는 것을 목표로 합니다\.
-
-최종적으로 다음과 같은 구조로 전환할 수 있습니다\.
+특히 보호 대상:
 
 ```text
-현재
-
-Flutter
-   │
-   ▼
-Firebase
- ├── Firestore
- ├── Storage
- └── Authentication
+관리자 데이터
+PDF 관리 데이터
+QnA 관리자 답변
+민감한 쓰기 작업
 ```
 
-향후:
+일반 사용자에게 전체 Firestore 쓰기 권한을 주지 않는 것을 권장합니다.
 
-```text
-Flutter
-   │
-   │ HTTPS
-   ▼
-NAS
- ├── FastAPI
- ├── Database
- ├── PDF Storage
- └── Admin API
-```
+---
 
-이때 Flutter UI가 Firebase에 직접 의존하지 않도록 Repository/API 계층을 두는 것이 중요합니다\.
+# 38. Firebase Storage
+
+현재 Storage에는 PDF가 있어야 합니다.
 
 예:
 
+```text
+365일 매일묵상말씀.pdf
+```
+
+앱에서 파일을 읽지 못할 경우:
+
+- Storage 파일명 확인
+- Firebase 프로젝트 확인
+- Storage Rules 확인
+- `firebase_options.dart` 프로젝트 확인
+
+순서로 확인합니다.
+
+---
+
+# 39. 평소 실행 방법
+
+PowerShell:
+
+```powershell
+cd D:\my_portfolio\Date-Pdf
+```
+
+Pub Cache 확인:
+
+```powershell
+echo $env:PUB_CACHE
+```
+
+필요하면:
+
+```powershell
+$env:PUB_CACHE="D:\PubCache"
+```
+
+패키지:
+
+```powershell
+flutter pub get
+```
+
+디바이스:
+
+```powershell
+flutter devices
+```
+
+실행:
+
+```powershell
+flutter run
+```
+
+---
+
+# 40. 완전 재빌드
+
+빌드가 이상할 때:
+
+```powershell
+cd D:\my_portfolio\Date-Pdf
+
+cd android
+.\gradlew --stop
+cd ..
+
+flutter clean
+
+Remove-Item -Recurse -Force build -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force .dart_tool -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force android\.gradle -ErrorAction SilentlyContinue
+
+flutter pub get
+flutter run
+```
+
+---
+
+# 41. 과거 오류 — Dart const
+
+오류:
+
+```text
+Not a constant expression
+```
+
+원인:
+
+런타임 값:
+
 ```dart
-pdfRepository.getCurrentPdf();
+todayPdfPage
 ```
 
-처럼 화면에서는 데이터의 출처를 알 필요가 없도록 만들고,
+를:
 
-현재:
-
-```text
-Repository
-    ↓
-Firebase
+```dart
+children: const [...]
 ```
 
-에서 향후:
+안에 넣음.
 
-```text
-Repository
-    ↓
-NAS API
-```
+해결:
 
-로 교체할 수 있도록 설계합니다\.
+해당 부모의 `const` 제거.
 
 ---
 
-# 🏠 NAS 전환 예상 구조
-
-NAS에서는 Docker를 이용해 다음과 같은 구조를 구성할 수 있습니다\.
+# 42. 과거 오류 — Windows Firebase 미설정
 
 ```text
-NAS
+DefaultFirebaseOptions have not been configured for windows
+```
+
+해결:
+
+```powershell
+flutterfire configure
+```
+
+에서 Windows 추가.
+
+또는 Android 에뮬레이터를 선택해서 실행.
+
+---
+
+# 43. 과거 오류 — JAVA_HOME 없음
+
+```text
+JAVA_HOME is not set
+```
+
+해결:
+
+JDK 17 설치 + `JAVA_HOME` 설정.
+
+---
+
+# 44. 과거 오류 — java.exe\bin\java
+
+오류:
+
+```text
+...\bin\java.exe\bin\java
+```
+
+원인:
+
+JDK 경로 설정에 `bin\java.exe`까지 넣음.
+
+해결:
+
+JDK 최상위 폴더까지만 지정.
+
+---
+
+# 45. 과거 오류 — NDK
+
+```text
+Package ndk not found
+```
+
+```text
+Package 28.2.13676358 not found
+```
+
+해결:
+
+Android Studio SDK Manager에서 NDK `28.2.13676358` 설치.
+
+---
+
+# 46. 과거 오류 — Kotlin different roots
+
+```text
+this and base files have different roots
+```
+
+해결:
+
+프로젝트와 Pub Cache를 같은 드라이브로 맞춤.
+
+현재 권장:
+
+```text
+D:\my_portfolio\Date-Pdf
+D:\PubCache
+```
+
+---
+
+# 47. 과거 오류 — Invalid depfile
+
+```text
+Invalid depfile
+.dart_tool\flutter_build\...\kernel_snapshot_program.d
+```
+
+해결:
+
+```powershell
+flutter clean
+Remove-Item -Recurse -Force .dart_tool -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force build -ErrorAction SilentlyContinue
+flutter pub get
+```
+
+---
+
+# 48. 과거 오류 — LocaleDataException
+
+```text
+LocaleDataException
+```
+
+해결:
+
+```dart
+await initializeDateFormatting('ko_KR', null);
+```
+
+---
+
+# 49. 최종적으로 사용하지 않는 기능
+
+현재 최종 방향에서는 아래 기능을 사용하지 않습니다.
+
+```text
+PDF 제목 OCR
+Google ML Kit 제목 인식
+AI Vision 제목 인식
+제목 카탈로그
+제목 Firestore 저장
+사용자 화면 제목 자동 추출
+```
+
+이 기능 때문에 추가했던 패키지/서비스는 정리하는 것이 좋습니다.
+
+---
+
+# 50. GitHub에 올리기 전 반드시 확인할 것
+
+GitHub에 코드를 올리기 전에 비밀정보가 포함되지 않았는지 확인합니다.
+
+절대 커밋하면 안 되는 것:
+
+```text
+.env
+Firebase Admin 서비스 계정 JSON
+firebase-service-account.json
+*.jks
+*.keystore
+android/key.properties
+개인 API Key
+비밀번호
+토큰
+```
+
+특히:
+
+```text
+Firebase 서비스 계정 JSON
+OpenAI API Key
+```
+
+는 절대 GitHub에 올리면 안 됩니다.
+
+---
+
+# 51. 권장 .gitignore
+
+프로젝트 루트의:
+
+```text
+.gitignore
+```
+
+에 최소한 다음을 포함하세요.
+
+```gitignore
+# Flutter / Dart
+.dart_tool/
+.packages
+.pub/
+build/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Android local
+android/local.properties
+android/key.properties
+*.jks
+*.keystore
+
+# iOS generated/local
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/ephemeral/
+
+# Secrets
+.env
+.env.*
+!.env.example
+*service-account*.json
+firebase-service-account*.json
+
+# Python tools / caches if any
+.venv/
+__pycache__/
+*.pyc
+
+# OS
+.DS_Store
+Thumbs.db
+```
+
+주의:
+
+`google-services.json`과 `firebase_options.dart`는 Firebase 클라이언트 설정 파일이며
+서비스 계정 비밀키와는 성격이 다릅니다.
+
+그래도 공개 저장소로 운영할 경우 프로젝트 정책에 맞춰 관리하세요.
+
+---
+
+# 52. Git 설치 확인
+
+PowerShell:
+
+```powershell
+git --version
+```
+
+없다면 Git for Windows를 먼저 설치합니다.
+
+---
+
+# 53. 현재 프로젝트가 Git 저장소인지 확인
+
+```powershell
+cd D:\my_portfolio\Date-Pdf
+
+git status
+```
+
+정상 Git 저장소라면 상태가 표시됩니다.
+
+아직 Git 저장소가 아니면:
+
+```text
+fatal: not a git repository
+```
+
+가 나옵니다.
+
+---
+
+# 54. 이미 GitHub repo가 연결되어 있는지 확인
+
+```powershell
+git remote -v
+```
+
+예:
+
+```text
+origin  https://github.com/USERNAME/Date-Pdf.git (fetch)
+origin  https://github.com/USERNAME/Date-Pdf.git (push)
+```
+
+이렇게 나오면 이미 GitHub repo가 연결된 것입니다.
+
+---
+
+# 55. 기존 GitHub repo에 현재 프로젝트 저장
+
+이미 `origin`이 있는 경우 가장 기본적인 순서:
+
+```powershell
+cd D:\my_portfolio\Date-Pdf
+
+git status
+git add .
+git commit -m "Finalize DatePDF v7.1"
+git push
+```
+
+처음 main 브랜치를 push하는 경우:
+
+```powershell
+git push -u origin main
+```
+
+---
+
+# 56. 처음 GitHub repo를 만드는 경우
+
+GitHub 웹사이트에서 새 repository를 생성합니다.
+
+권장:
+
+```text
+Repository name:
+Date-Pdf
+```
+
+이미 로컬에 README가 있으므로
+처음 repo를 만들 때 가능하면:
+
+```text
+Add a README
+Add .gitignore
+Add license
+```
+
+를 체크하지 않고 **빈 repo**로 만드는 것이 충돌을 줄이기 쉽습니다.
+
+---
+
+# 57. 로컬 프로젝트를 새 GitHub repo에 연결
+
+프로젝트 루트:
+
+```powershell
+cd D:\my_portfolio\Date-Pdf
+```
+
+Git 초기화:
+
+```powershell
+git init
+```
+
+브랜치:
+
+```powershell
+git branch -M main
+```
+
+모든 파일 추가:
+
+```powershell
+git add .
+```
+
+확인:
+
+```powershell
+git status
+```
+
+첫 커밋:
+
+```powershell
+git commit -m "Initial DatePDF project"
+```
+
+GitHub repo 연결:
+
+```powershell
+git remote add origin https://github.com/USERNAME/Date-Pdf.git
+```
+
+Push:
+
+```powershell
+git push -u origin main
+```
+
+`USERNAME`과 repo 이름은 실제 GitHub 주소로 바꿉니다.
+
+---
+
+# 58. origin이 이미 있는데 주소가 틀린 경우
+
+확인:
+
+```powershell
+git remote -v
+```
+
+변경:
+
+```powershell
+git remote set-url origin https://github.com/USERNAME/Date-Pdf.git
+```
+
+다시:
+
+```powershell
+git push -u origin main
+```
+
+---
+
+# 59. GitHub repo에 이미 README가 있는 경우
+
+GitHub에서 repo를 만들 때 README를 먼저 생성했다면
+로컬과 원격 히스토리가 다를 수 있습니다.
+
+먼저:
+
+```powershell
+git pull --rebase origin main
+```
+
+문제가 없다면:
+
+```powershell
+git push -u origin main
+```
+
+충돌이 생기면 충돌 파일을 직접 정리한 뒤:
+
+```powershell
+git add .
+git rebase --continue
+git push
+```
+
+처음부터 빈 repo를 만드는 것이 가장 편합니다.
+
+---
+
+# 60. GitHub 로그인
+
+GitHub는 일반 계정 비밀번호를 Git push 비밀번호처럼 사용하는 방식이 아닙니다.
+
+Git for Windows의 Git Credential Manager가 설치되어 있다면
+`git push` 시 브라우저 로그인 창이 뜰 수 있습니다.
+
+브라우저에서 GitHub 로그인을 완료하면 됩니다.
+
+---
+
+# 61. 현재 프로젝트를 GitHub에 올릴 때 권장 순서
+
+실제로는 아래 순서만 기억하면 됩니다.
+
+```powershell
+cd D:\my_portfolio\Date-Pdf
+```
+
+비밀 파일 확인:
+
+```powershell
+git status
+```
+
+.gitignore 확인 후:
+
+```powershell
+git add .
+```
+
+다시 확인:
+
+```powershell
+git status
+```
+
+커밋:
+
+```powershell
+git commit -m "DatePDF final setup"
+```
+
+원격 확인:
+
+```powershell
+git remote -v
+```
+
+Push:
+
+```powershell
+git push
+```
+
+---
+
+# 62. 이후 개발할 때 Git 사용
+
+작업 시작:
+
+```powershell
+git pull
+```
+
+코드 수정.
+
+변경 확인:
+
+```powershell
+git status
+```
+
+저장:
+
+```powershell
+git add .
+git commit -m "Improve PDF view statistics"
+git push
+```
+
+---
+
+# 63. 커밋 메시지 예시
+
+```text
+Fix PDF local caching
+Update Korean calendar UI
+Add direct-open page statistics
+Remove OCR title extraction
+Clean up admin menu
+Finalize DatePDF v7.1
+```
+
+---
+
+# 64. 현재 프로젝트 전체를 안전하게 백업하는 방법
+
+GitHub:
+
+```text
+소스 코드
+설정 파일
+README
+```
+
+백업.
+
+Firebase:
+
+```text
+Firestore 데이터
+Storage PDF
+```
+
+는 별도 클라우드 데이터입니다.
+
+즉 GitHub에 push했다고 해서 Firebase Storage의 PDF와 Firestore 데이터가
+GitHub에 같이 백업되는 것은 아닙니다.
+
+필요하면 Firebase 데이터도 별도로 백업해야 합니다.
+
+---
+
+# 65. APK / build 결과는 Git에 올리지 않기
+
+다음은 Git에 올리지 않는 것을 권장합니다.
+
+```text
+build/
+.dart_tool/
+```
+
+APK/AAB 배포 파일이 필요하다면 GitHub Releases나 별도 배포 스토리지를 사용하는 것이 좋습니다.
+
+---
+
+# 66. 배포용 Android 빌드
+
+테스트가 끝난 뒤:
+
+```powershell
+flutter build appbundle --release
+```
+
+또는 APK:
+
+```powershell
+flutter build apk --release
+```
+
+릴리스 서명키는 GitHub에 커밋하지 않습니다.
+
+---
+
+# 67. 현재 최종 UI 용어
+
+```text
+오늘의 PDF
+→ 오늘의 말씀
+```
+
+```text
+일정
+→ 찾아보기
+```
+
+```text
+많이 방문한 페이지
+→ 많이 본 말씀
+```
+
+```text
+최근 본 페이지
+→ 최근 본 말씀
+```
+
+개별 제목:
+
+```text
+OCR 제목
+→ 사용하지 않음
+```
+
+---
+
+# 68. 최종 데이터 흐름
+
+앱 시작:
+
+```text
+Flutter
 │
-├── Reverse Proxy
-│
-├── FastAPI
-│   ├── PDF API
-│   ├── Admin API
-│   ├── QnA API
-│   └── Statistics API
-│
-├── Database
-│
-└── PDF Storage
+├─ Firebase 초기화
+├─ 한국어 locale 초기화
+├─ 사용자 이름 로드
+├─ PDF 로컬 preload
+└─ 홈 표시
 ```
 
-외부 인터넷에서 NAS를 사용할 경우에는 단순한 포트포워딩보다 HTTPS, 방화벽, 인증, Reverse Proxy 등의 보안 구성을 함께 고려해야 합니다\.
-
----
-
-# 🔐 보안 원칙
-
-이 프로젝트에서는 다음 원칙을 적용합니다\.
-
-### 일반 사용자
-
-- 별도 회원가입 없음
-- 일반 데이터 읽기
-- PDF 보기
-- QnA 사용
-
-### 관리자
-
-- 승인코드 인증
-- PDF 업로드/교체
-- 날짜/페이지 관리
-- 통계 확인
-- QnA 관리
-
-### 서버
-
-- 관리자 권한 검증
-- PDF 쓰기 권한 제한
-- 데이터베이스 쓰기 권한 제한
-- Firebase Security Rules 적용
-
-특히 **관리자 승인코드와 Firebase 관리자 권한을 Flutter 앱에 직접 저장하지 않는 것**을 원칙으로 합니다\.
-
----
-
-# 📌 현재 프로젝트의 한계
-
-현재 버전은 아직 완성된 서비스가 아니라 **개발용 UI/기능 프로토타입**입니다\.
-
-아직 실제 연결이 필요한 부분:
-
-- 실제 PDF Viewer
-- Firebase Storage
-- Firestore
-- 실제 방문 통계
-- 실제 QnA
-- 서버 측 관리자 인증
-- Firebase Security Rules
-- 실제 Push Notification
-
-따라서 현재 코드에 포함된 관리자 승인코드나 샘플 통계 데이터는 실제 서비스용 보안/데이터가 아닙니다\.
-
----
-
-# 📄 PDF 형식 관련 참고
-
-현재 개발 기준 PDF는 365일 일일 콘텐츠가 들어 있는 문서이며, 총 368페이지입니다\.
-
-현재 확인된 주요 매핑:
-
-|날짜     |PDF 페이지|
-|-------|------:|
-|1월 1일  |4      |
-|2월 1일  |35     |
-|4월 3일  |96     |
-|9월 23일 |269    |
-|12월 31일|368    |
-
-따라서 현재 버전에서는 OCR을 이용하여 매일 날짜를 검색하는 것보다 **날짜 순번을 계산하여 페이지를 결정하는 방식이 더 단순하고 안정적**입니다\.
-
-단, PDF의 형식이 변경될 경우 날짜/페이지 매핑 로직을 다시 검증해야 합니다\.
-
----
-
-# 👨‍💻 개발 목적
-
-이 프로젝트는 다음 기술을 실제로 적용하고 학습하는 것을 목표로 합니다\.
-
-- Flutter
-- Dart
-- Firebase
-- Firestore
-- Firebase Storage
-- 모바일 앱 UI/UX
-- PDF 처리
-- REST API 구조
-- 서버 인증
-- 관리자 권한 관리
-- 데이터 통계
-- Docker
-- NAS 서버
-- 모바일 앱 배포
-- Android / iOS 테스트 배포
-
----
-
-# 📜 License
-
-프로젝트의 실제 배포 및 PDF 콘텐츠에 대한 저작권/사용 권한을 확인한 후 라이선스를 결정합니다\.
-
-PDF 원본 콘텐츠는 프로젝트 소스 코드와 별도로 관리하는 것을 권장합니다\.
-
----
-
-# 📞 Project Status
-
-현재 상태:
+오늘 말씀:
 
 ```text
-🟡 Prototype / Development
+오늘 날짜
+↓
+DatePageMapper
+↓
+PDF 페이지 계산
+↓
+오늘 말씀 보기 클릭
+↓
+직접 클릭 조회수 +1
+↓
+로컬 캐시 PDF 열기
+↓
+해당 페이지 표시
 ```
 
-목표:
+찾아보기:
 
 ```text
-Flutter App
-    ↓
-Firebase
-    ↓
-10명 내외 제한 테스트
-    ↓
-사용성/안정성 검증
-    ↓
-필요 시 NAS 서버 전환
+날짜 선택
+↓
+PDF 페이지 계산
+↓
+보기 클릭
+↓
+직접 클릭 조회수 +1
+↓
+PDF 열기
 ```
+
+스크롤:
+
+```text
+PDF 내부 스크롤
+↓
+다른 페이지 표시
+↓
+조회수 변화 없음
+```
+
+---
+
+# 69. 향후 개발 우선순위
+
+권장 순서:
+
+```text
+1. PDF 관리 실제 구현
+2. 날짜/페이지 관리자 수정 UI
+3. 방문 통계 관리자 화면
+4. QnA Firestore 연결
+5. 관리자 인증 서버화
+6. Firebase Security Rules 정리
+7. PDF 버전 관리
+8. Push Notification
+9. Android 비공개 테스트
+10. iOS TestFlight
+```
+
+---
+
+# 70. 최종 체크리스트
+
+새 PC에서:
+
+```text
+[ ] Flutter 설치
+[ ] flutter doctor -v 정상
+[ ] JDK 17 설치
+[ ] JAVA_HOME 정상
+[ ] Android SDK 설치
+[ ] NDK 28.2.13676358 확인
+[ ] D: 프로젝트면 PUB_CACHE를 D:로 설정
+[ ] flutterfire configure
+[ ] Firebase Storage PDF 확인
+[ ] Firestore (default) DB 생성
+[ ] flutter pub get
+[ ] Android 디바이스 확인
+[ ] flutter run
+```
+
+코드:
+
+```text
+[ ] OCR 관련 파일 제거
+[ ] ML Kit 패키지 제거
+[ ] admin_title_catalog_page.dart 제거
+[ ] 관리자 화면에서 제목 메뉴 제거
+[ ] 직접 클릭만 조회수 기록
+[ ] PDF 스크롤은 조회수 미기록
+[ ] 찾아보기 한국어 날짜 표시
+```
+
+GitHub:
+
+```text
+[ ] .gitignore 확인
+[ ] API Key 없음
+[ ] 서비스 계정 JSON 없음
+[ ] keystore 없음
+[ ] git status 확인
+[ ] git add .
+[ ] git commit
+[ ] git remote -v
+[ ] git push
+```
+
+---
+
+# 71. 현재 최종 상태
+
+```text
+DatePDF v7.1
+
+Flutter Android
+↓
+Firebase Storage PDF
+↓
+기기 로컬 PDF 캐시
+↓
+날짜별 페이지 자동 이동
+
+Firestore
+↓
+직접 클릭 조회수
+
+SharedPreferences
+↓
+사용자 이름
+↓
+최근 직접 열어본 말씀
+
+UI
+↓
+오늘의 말씀
+찾아보기
+많이 본 말씀
+최근 본 말씀
+QnA
+관리자 센터
+```
+
+제목 자동 추출은 사용하지 않습니다.
+
+---
+
+# 72. 변경 이력
+
+## 2026-09-23 ~ 2026-09-24 개발 정리
+
+- Flutter UI 구성
+- 날짜 → PDF 페이지 자동 계산
+- Firebase 연결
+- Firebase Storage PDF 업로드 및 읽기
+- `pdfrx` 실제 PDF Viewer 적용
+- PDF 로컬 캐시 추가
+- 한국어 날짜 초기화
+- 한국어 CalendarDatePicker 적용
+- JDK 17 환경 구성
+- NDK 28.2.13676358 문제 해결
+- C:/D: Kotlin cache 충돌 해결
+- Pub Cache D: 이동
+- Firestore `(default)` 데이터베이스 필요 확인
+- 제목 OCR 방식 테스트
+- 손글씨/혼합 폰트 제목 인식 한계 확인
+- 제목 자동 추출 최종 제거 결정
+- 사용자 UI를 `오늘의 말씀` 중심으로 단순화
+- `일정` → `찾아보기`
+- `많이 방문한 페이지` → `많이 본 말씀`
+- `최근 본 페이지` → `최근 본 말씀`
+- 직접 클릭 조회수 정책 적용
+- PDF 내부 스크롤 조회수 제외
+- 관리자 제목/OCR 메뉴 제거
+- 최종 GitHub 백업/업로드 절차 문서화
+
+---
+
+# 73. 핵심 원칙
+
+이 프로젝트의 최종 원칙은 다음과 같습니다.
+
+```text
+복잡한 OCR보다 안정적인 날짜 매핑
+네트워크 PDF보다 로컬 캐시
+페이지 노출보다 직접 클릭 통계
+기술적인 페이지 번호보다 사용자 친화적인 날짜/말씀 UI
+비밀키는 GitHub에 저장하지 않기
+```
+
+이 문서를 현재 프로젝트의 최종 기준 README로 사용합니다.

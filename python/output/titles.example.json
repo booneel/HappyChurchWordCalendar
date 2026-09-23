@@ -1,0 +1,33 @@
+{
+  "year": 2026,
+  "start_page": 4,
+  "page_count": 365,
+  "generated_at": "example",
+  "titles": {
+    "09-13": {
+      "title": "움직임을 가질 때",
+      "confidence": 0.98,
+      "model": "gpt-5.6-luna",
+      "page": 259,
+      "date": "2026-09-13",
+      "crop": "crops/09-13_p259.png"
+    },
+    "09-23": {
+      "title": "충성",
+      "confidence": 0.99,
+      "model": "gpt-5.6-luna",
+      "page": 269,
+      "date": "2026-09-23",
+      "crop": "crops/09-23_p269.png"
+    },
+    "10-27": {
+      "title": "하나님의 뜻을 행하는 자",
+      "confidence": 0.97,
+      "model": "gpt-5.6-terra",
+      "page": 303,
+      "date": "2026-10-27",
+      "crop": "crops/10-27_p303.png",
+      "fallback_used": true
+    }
+  }
+}
