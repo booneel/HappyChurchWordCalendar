@@ -41,6 +41,17 @@ android {
     }
 }
 
+// google_mlkit_text_recognition declares the optional language recognizers as
+// compileOnly dependencies. R8 still sees their class references in release
+// builds, so include the language artifacts explicitly to prevent a release
+// APK from failing at startup or being rejected during shrinking.
+dependencies {
+    implementation("com.google.mlkit:text-recognition-korean:16.0.1")
+    implementation("com.google.mlkit:text-recognition-chinese:16.0.1")
+    implementation("com.google.mlkit:text-recognition-japanese:16.0.1")
+    implementation("com.google.mlkit:text-recognition-devanagari:16.0.1")
+}
+
 kotlin {
     compilerOptions {
         jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17

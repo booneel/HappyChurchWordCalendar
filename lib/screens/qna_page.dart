@@ -101,9 +101,8 @@ class _QnaPageState extends State<QnaPage> {
 
       if (!mounted) return;
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('질문이 성공적으로 등록되었습니다.')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('질문이 성공적으로 등록되었습니다.')));
 
       setState(() {});
     }
@@ -135,7 +134,6 @@ class _QnaPageState extends State<QnaPage> {
                 ],
               ),
               const Divider(height: 20),
-
               const Text(
                 '📝 질문 내용',
                 style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
@@ -146,7 +144,6 @@ class _QnaPageState extends State<QnaPage> {
                 style: const TextStyle(fontSize: 15),
               ),
               const SizedBox(height: 20),
-
               const Text(
                 '💬 관리자 답변',
                 style: TextStyle(
@@ -231,7 +228,6 @@ class _QnaPageState extends State<QnaPage> {
                       style: TextStyle(color: Colors.grey.shade600),
                     ),
                     const SizedBox(height: 16),
-
                     TextField(
                       onChanged: (val) {
                         setState(() => _searchQuery = val.trim());
@@ -250,13 +246,13 @@ class _QnaPageState extends State<QnaPage> {
                       ),
                     ),
                     const SizedBox(height: 14),
-
                     Row(
                       children: [
                         ChoiceChip(
                           label: const Text('전체'),
                           selected: _filterMode == 'all',
-                          onSelected: (_) => setState(() => _filterMode = 'all'),
+                          onSelected: (_) =>
+                              setState(() => _filterMode = 'all'),
                         ),
                         const SizedBox(width: 8),
                         ChoiceChip(
@@ -268,7 +264,6 @@ class _QnaPageState extends State<QnaPage> {
                       ],
                     ),
                     const SizedBox(height: 14),
-
                     if (filtered.isEmpty) ...[
                       Card(
                         child: Padding(
@@ -326,7 +321,9 @@ class _QnaPageState extends State<QnaPage> {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
-                            subtitle: Row(
+                            subtitle: Wrap(
+                              spacing: 8,
+                              runSpacing: 4,
                               children: [
                                 Text(
                                   dateFormat.format(item.createdAt),
@@ -335,7 +332,6 @@ class _QnaPageState extends State<QnaPage> {
                                     color: Colors.grey.shade600,
                                   ),
                                 ),
-                                const SizedBox(width: 8),
                                 Container(
                                   padding: const EdgeInsets.symmetric(
                                     horizontal: 6,
@@ -365,7 +361,6 @@ class _QnaPageState extends State<QnaPage> {
                           ),
                         ),
                     ],
-
                     const SizedBox(height: 16),
                     FilledButton.icon(
                       onPressed: _openAskDialog,

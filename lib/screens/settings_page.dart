@@ -25,12 +25,35 @@ class _SettingsPageState extends State<SettingsPage> {
   final profile = LocalProfileService();
   final adminService = AdminService.instance;
   late bool adminMode;
+  late String currentDisplayName;
+  bool pdfNotificationsEnabled = true;
+  bool qnaNotificationsEnabled = true;
 
   @override
   void initState() {
     super.initState();
     adminMode = widget.adminMode;
+    currentDisplayName = widget.displayName;
+    _loadNotificationPreferences();
     _checkAdminState();
+  }
+
+  @override
+  void didUpdateWidget(covariant SettingsPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.displayName != widget.displayName) {
+      currentDisplayName = widget.displayName;
+    }
+  }
+
+  Future<void> _loadNotificationPreferences() async {
+    final pdfEnabled = await profile.isPdfNotificationsEnabled();
+    final qnaEnabled = await profile.isQnaNotificationsEnabled();
+    if (!mounted) return;
+    setState(() {
+      pdfNotificationsEnabled = pdfEnabled;
+      qnaNotificationsEnabled = qnaEnabled;
+    });
   }
 
   Future<void> _checkAdminState() async {
@@ -41,7 +64,7 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Future<void> _changeName() async {
-    final controller = TextEditingController(text: widget.displayName);
+    final controller = TextEditingController(text: currentDisplayName);
     final value = await showDialog<String>(
       context: context,
       builder: (_) => AlertDialog(
@@ -53,17 +76,32 @@ class _SettingsPageState extends State<SettingsPage> {
           decoration: const InputDecoration(hintText: '표시할 이름'),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('취소')),
-          FilledButton(onPressed: () => Navigator.pop(context, controller.text.trim()), child: const Text('저장')),
+          TextButton(
+              onPressed: () => Navigator.pop(context), child: const Text('취소')),
+          FilledButton(
+              onPressed: () => Navigator.pop(context, controller.text.trim()),
+              child: const Text('저장')),
         ],
       ),
     );
 
     if (value != null && value.isNotEmpty) {
       await profile.saveName(value);
+      if (mounted) {
+        setState(() => currentDisplayName = value);
+      }
       widget.onChanged();
-      if (mounted) setState(() {});
     }
+  }
+
+  Future<void> _setPdfNotifications(bool value) async {
+    setState(() => pdfNotificationsEnabled = value);
+    await profile.setPdfNotificationsEnabled(value);
+  }
+
+  Future<void> _setQnaNotifications(bool value) async {
+    setState(() => qnaNotificationsEnabled = value);
+    await profile.setQnaNotificationsEnabled(value);
   }
 
   Future<void> _adminEntry() async {
@@ -125,36 +163,35 @@ class _SettingsPageState extends State<SettingsPage> {
             child: ListTile(
               leading: const Icon(Icons.person_outline),
               title: const Text('이름'),
-              subtitle: Text(widget.displayName),
+              subtitle: Text(currentDisplayName),
               trailing: const Icon(Icons.chevron_right),
               onTap: _changeName,
             ),
           ),
           const SizedBox(height: 20),
-
           const SectionTitle('🔔 알림'),
           Card(
             child: Column(
               children: [
                 SwitchListTile(
                   title: const Text('PDF 업데이트 알림'),
-                  value: true,
-                  onChanged: (_) {},
+                  value: pdfNotificationsEnabled,
+                  onChanged: _setPdfNotifications,
                 ),
                 SwitchListTile(
                   title: const Text('QnA 답변 알림'),
-                  value: true,
-                  onChanged: (_) {},
+                  value: qnaNotificationsEnabled,
+                  onChanged: _setQnaNotifications,
                 ),
               ],
             ),
           ),
           const SizedBox(height: 20),
-
           const SectionTitle('🔐 관리자'),
           Card(
             child: ListTile(
-              leading: Icon(adminMode ? Icons.admin_panel_settings : Icons.lock_outline),
+              leading: Icon(
+                  adminMode ? Icons.admin_panel_settings : Icons.lock_outline),
               title: const Text('관리자 모드'),
               subtitle: Text(
                 adminMode ? '현재 활성화됨 (관리자 전용 기능)' : '승인코드로 관리자 기능 사용',
@@ -168,12 +205,12 @@ class _SettingsPageState extends State<SettingsPage> {
             Card(
               child: ListTile(
                 leading: const Icon(Icons.logout, color: Colors.red),
-                title: const Text('관리자 모드 종료', style: TextStyle(color: Colors.red)),
+                title: const Text('관리자 모드 종료',
+                    style: TextStyle(color: Colors.red)),
                 onTap: _exitAdmin,
               ),
             ),
           ],
-
           const SizedBox(height: 20),
           const SectionTitle('ℹ️ 앱 정보'),
           Card(
@@ -204,7 +241,8 @@ class SectionTitle extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
-      child: Text(text, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+      child: Text(text,
+          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
     );
   }
 }

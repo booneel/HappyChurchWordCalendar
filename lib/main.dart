@@ -16,9 +16,15 @@ Future<void> main() async {
   );
 
   if (!BackendConfig.useNas) {
-    await Firebase.initializeApp(
-      options: DefaultFirebaseOptions.currentPlatform,
-    );
+    try {
+      await Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform,
+      );
+    } catch (_) {
+      // Firebase 설정/네트워크가 일시적으로 없어도 로컬 캐시 화면은
+      // 실행할 수 있어야 합니다. 각 서비스는 Firebase 앱이 없을 때
+      // 로컬 데이터로 동작하도록 방어되어 있습니다.
+    }
   }
 
   runApp(

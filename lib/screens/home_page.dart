@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:pdfrx/pdfrx.dart' as pdfrx;
 
 import 'app_shell.dart';
 import 'pdf_page.dart';
@@ -41,11 +43,13 @@ class _HomePageState extends State<HomePage> {
   late Future<_HomeData> dataFuture;
   StreamSubscription<List<PageViewStat>>? _topPagesSubscription;
   bool _titlesLoaded = false;
+  late Future<File> _pdfFuture;
 
   @override
   void initState() {
     super.initState();
     dataFuture = _loadData();
+    _pdfFuture = PdfCacheService().getCachedPdf();
 
     // PDF는 홈을 보는 동안 백그라운드에서 미리 준비합니다.
     PdfCacheService().preload();
@@ -146,11 +150,13 @@ class _HomePageState extends State<HomePage> {
                       color: Colors.amber.shade50,
                       borderRadius: BorderRadius.circular(14),
                     ),
-                    child: const Row(
+                    child: Row(
                       children: [
                         Icon(Icons.admin_panel_settings_outlined, size: 20),
                         SizedBox(width: 8),
-                        Text('관리자 모드가 활성화되어 있습니다.'),
+                        const Expanded(
+                          child: Text('관리자 모드가 활성화되어 있습니다.', softWrap: true),
+                        ),
                       ],
                     ),
                   ),
@@ -206,6 +212,11 @@ class _HomePageState extends State<HomePage> {
                             ),
                           ),
                           const SizedBox(height: 16),
+                          _TodayPdfPreview(
+                            pdfFuture: _pdfFuture,
+                            page: todayPage,
+                          ),
+                          const SizedBox(height: 14),
                           SizedBox(
                             width: double.infinity,
                             child: FilledButton.icon(
@@ -268,12 +279,16 @@ class _HomePageState extends State<HomePage> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text(
-                      '🕘 최근 본 말씀',
-                      style: Theme.of(context)
-                          .textTheme
-                          .titleLarge
-                          ?.copyWith(fontWeight: FontWeight.w800),
+                    Expanded(
+                      child: Text(
+                        '🕘 최근 본 말씀',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleLarge
+                            ?.copyWith(fontWeight: FontWeight.w800),
+                      ),
                     ),
                     TextButton(
                       onPressed: () async {
@@ -315,6 +330,69 @@ class _HomePageState extends State<HomePage> {
           },
         ),
       ),
+    );
+  }
+}
+
+class _TodayPdfPreview extends StatelessWidget {
+  final Future<File> pdfFuture;
+  final int page;
+
+  const _TodayPdfPreview({
+    required this.pdfFuture,
+    required this.page,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<File>(
+      future: pdfFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return _previewFrame(
+            const Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        if (snapshot.hasError || snapshot.data == null) {
+          return _previewFrame(
+            const Center(
+              child: Text(
+                '오늘 말씀 미리보기를 준비하지 못했습니다.\n눌러서 PDF를 열어보세요.',
+                textAlign: TextAlign.center,
+              ),
+            ),
+          );
+        }
+
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(14),
+          child: SizedBox(
+            height: 300,
+            child: IgnorePointer(
+              child: pdfrx.PdfViewer.file(
+                snapshot.data!.path,
+                initialPageNumber: page,
+                params: const pdfrx.PdfViewerParams(
+                  pageAnchor: pdfrx.PdfPageAnchor.top,
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _previewFrame(Widget child) {
+    return Container(
+      height: 180,
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: const Color(0xFFF1F4F8),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: child,
     );
   }
 }
@@ -387,7 +465,12 @@ class _RecentWordRow extends StatelessWidget {
 
     return ListTile(
       leading: const Icon(Icons.menu_book_outlined),
-      title: Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
+      title: Text(
+        title,
+        style: const TextStyle(fontWeight: FontWeight.w700),
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+      ),
       subtitle: Text(dateText),
       trailing: const Icon(Icons.chevron_right),
       onTap: onTap,

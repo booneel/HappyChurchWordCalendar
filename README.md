@@ -2265,3 +2265,40 @@ flutter install --release
 ```
 
 NAS 배포 APK는 `DATEPDF_BACKEND`, `DATEPDF_NAS_BASE_URL`, `DATEPDF_NAS_TOKEN`을 `--dart-define`으로 지정하여 별도로 빌드해야 합니다. GitHub에 올리기 전에는 `git status`, `git diff --cached --check`, `git commit`까지 완료해야 변경 내용이 원격 저장소에 포함됩니다.
+
+## 76. 설정 화면의 사용자 이름과 알림 토글
+
+사용자 이름은 `SharedPreferences`의 `display_name` 키에 저장되며, 저장 직후 설정 화면과 홈 화면에 다시 표시됩니다. PDF 업데이트 알림과 QnA 답변 알림 스위치는 각각 다음 로컬 키에 저장됩니다.
+
+```text
+pdf_notifications_enabled
+qna_notifications_enabled
+```
+
+스위치를 껐다 켜는 설정은 현재 기기별 환경설정입니다. 실제 백그라운드 푸시 알림을 보내려면 Firebase Cloud Messaging 또는 NAS 알림 서버와 Android 13 알림 권한 처리가 추가로 필요합니다. 현재 코드는 토글 상태를 저장하고 이후 알림 발송 기능이 이 설정을 참조할 수 있도록 구성되어 있습니다.
+
+## 77. 기기별 화면 대응과 오늘 말씀 프리뷰
+
+홈 화면의 오늘 말씀 카드에는 현재 날짜에 매핑된 PDF 페이지를 작은 PDF 뷰어로 표시합니다. 프리뷰를 누르면 같은 날짜의 전체 PDF 화면으로 이동하고, 프리뷰를 단순히 노출하는 것만으로는 조회수를 증가시키지 않습니다.
+
+화면 폭이 좁은 기기에서 발생하는 `RenderFlex overflow`를 줄이기 위해 관리자 안내 문구와 QnA 상태 영역은 `Expanded`/`Wrap`으로 배치하고, 긴 제목은 줄바꿈과 말줄임을 사용합니다. PDF 프리뷰는 고정 높이 영역 안에서 렌더링하여 홈 목록의 세로 레이아웃이 깨지지 않도록 구성했습니다.
+
+## 78. 실기기 설치 직후 종료되는 경우
+
+Release APK는 debug APK와 달리 R8 축소와 release 매니페스트를 사용합니다. 이 프로젝트는 Firebase/NAS/PDF를 네트워크에서 읽으므로 기본 Android 매니페스트에 `android.permission.INTERNET`이 필요합니다. ML Kit 제목 분석의 선택 언어 라이브러리도 release R8에서 누락되지 않도록 `android/app/build.gradle.kts`에 명시적으로 포함합니다.
+
+실기기용 APK는 다음처럼 새로 빌드합니다.
+
+```powershell
+flutter clean
+flutter pub get
+flutter build apk --release
+```
+
+앱이 계속 종료되면 Android Studio의 `Logcat`에서 `FATAL EXCEPTION`부터 확인합니다. Firebase 초기화가 실패해도 앱 전체가 종료되지 않도록 로컬 캐시 화면으로 시작하도록 방어했지만, 실제 Firebase/NAS 데이터를 사용하려면 인터넷과 서버 주소가 올바르게 설정되어 있어야 합니다.
+
+## 79. PDF 한 페이지 보기와 확대
+
+PDF 상세 화면은 현재 페이지 하나만 표시합니다. 세로로 앞뒤 페이지가 함께 보이지 않으며, 하단의 이전/페이지/다음 조작 바도 제거했습니다. 페이지는 좌우로 밀어서 이동하고, 두 손가락으로 확대하거나 축소할 수 있습니다. 확대 범위는 1배부터 4배까지이며, 화면 상단에는 현재 페이지 번호만 표시됩니다.
+
+이 화면은 PDF 페이지를 이미지로 렌더링해 표시하므로 기기별 PDF 뷰어 레이아웃 차이를 줄이고, 페이지 단위 프리뷰와 확대 동작을 안정적으로 제공합니다. 홈 화면의 작은 오늘 말씀 프리뷰는 기존 PDF 뷰어를 유지하고, 상세 화면을 열었을 때만 이 한 페이지 전용 뷰어를 사용합니다.
