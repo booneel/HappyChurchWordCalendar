@@ -44,7 +44,11 @@ class _SchedulePageState extends State<SchedulePage> {
     await Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => PdfPage(title: title, page: page),
+        builder: (_) => PdfPage(
+          title: title,
+          page: page,
+          year: selected.year,
+        ),
       ),
     );
   }

@@ -16,7 +16,7 @@ class PdfCatalogService {
 
   static const String collection = 'pdf_catalog';
   static const String documentId = 'current';
-  static const int currentTitleAlgorithmVersion = 3;
+  static const int currentTitleAlgorithmVersion = 4;
   static const String _localKey = 'pdf_catalog_titles_v4';
   static const String _localConfKey = 'pdf_catalog_confidences_v4';
   static const String _localYearKey = 'pdf_catalog_year_v4';

@@ -50,6 +50,7 @@ class _RecentHistoryPageState extends State<RecentHistoryPage> {
         builder: (_) => PdfPage(
           title: title,
           page: item.page,
+          year: item.date.year,
         ),
       ),
     );

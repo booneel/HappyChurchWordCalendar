@@ -138,7 +138,7 @@ class PdfCatalogBuilderService {
           ExtractedTitleInfo? info = await _extractTitleWithContext(page);
 
           // 2. OCR 요소를 통한 시각적 보완 및 한 문장 조합
-          if ((info == null || info.confidence < 0.80) && recognizer != null) {
+          if ((info == null || info.confidence < 0.90) && recognizer != null) {
             final ocrInfo = await _extractOcrTitleWithContext(page, recognizer);
             if (ocrInfo != null &&
                 (info == null || ocrInfo.confidence > info.confidence)) {
@@ -200,8 +200,17 @@ class PdfCatalogBuilderService {
       }
 
       final lines = _groupLayoutLines(pieces);
-      final contextual = _extractTitleFromLayout(lines);
-      if (contextual != null) return contextual;
+      ExtractedTitleInfo? best;
+
+      void consider(ExtractedTitleInfo? candidate) {
+        if (candidate == null || candidate.title.trim().isEmpty) return;
+        if (best == null || candidate.confidence > best!.confidence) {
+          best = candidate;
+        }
+      }
+
+      consider(_extractTitleFromLayout(lines));
+      consider(_extractTitleFromPlainText(structured.fullText));
 
       // 일부 PDF는 텍스트 순서만 제공하므로, 마지막으로 위치 기반 후보를 시도합니다.
       final fallbackPieces = pieces.where((piece) {
@@ -217,11 +226,57 @@ class PdfCatalogBuilderService {
         yTolerance: 0.04,
       );
       if (merged != null && merged.isNotEmpty) {
-        return ExtractedTitleInfo(title: merged, confidence: 0.55);
+        consider(ExtractedTitleInfo(title: merged, confidence: 0.55));
       }
+
+      return best;
     } catch (_) {}
 
     return null;
+  }
+
+  ExtractedTitleInfo? _extractTitleFromPlainText(String fullText) {
+    final lines = fullText
+        .split(RegExp(r'[\r\n]+'))
+        .map(_normalize)
+        .where((line) => line.isNotEmpty)
+        .toList();
+
+    if (lines.isEmpty) return null;
+
+    final dateIndex = lines.indexWhere(_isDateText);
+    final startIndex = dateIndex < 0 ? 0 : dateIndex + 1;
+    final scanCount = dateIndex < 0 ? 12 : 8;
+
+    final titleLines = <String>[];
+    for (final line in lines.skip(startIndex).take(scanCount)) {
+      if (_isHappyChurch(line) || _isScriptureReference(line)) continue;
+      if (_isLikelyBodyLine(line, 0)) {
+        if (titleLines.isNotEmpty) break;
+        continue;
+      }
+      if (!_canBeTitleLine(line)) {
+        if (titleLines.isNotEmpty) break;
+        continue;
+      }
+
+      titleLines.add(line);
+      if (titleLines.length == 3) break;
+    }
+
+    if (titleLines.isEmpty) return null;
+
+    final title = _smartJoin(titleLines);
+    if (!_canBeTitleLine(title)) return null;
+
+    return ExtractedTitleInfo(
+      title: title,
+      confidence: dateIndex < 0
+          ? 0.48
+          : titleLines.length == 1
+          ? 0.58
+          : 0.63,
+    );
   }
 
   List<_LayoutLine> _groupLayoutLines(List<_PhrasePiece> pieces) {
@@ -258,8 +313,7 @@ class PdfCatalogBuilderService {
         bottom: centerY - height / 2,
         height: height,
       );
-    }).toList()
-      ..sort((a, b) => b.centerY.compareTo(a.centerY));
+    }).toList()..sort((a, b) => b.centerY.compareTo(a.centerY));
   }
 
   ExtractedTitleInfo? _extractTitleFromLayout(List<_LayoutLine> lines) {
@@ -346,15 +400,16 @@ class PdfCatalogBuilderService {
     }
     final heightRatio =
         titleLines.map((e) => e.height).reduce((a, b) => a + b) /
-            titleLines.length /
-            (nextBody.height == 0 ? 1 : nextBody.height);
+        titleLines.length /
+        (nextBody.height == 0 ? 1 : nextBody.height);
     final lengthScore = title.length <= 45 ? 0.08 : -0.08;
     final lineScore = titleLines.length <= 2 ? 0.08 : 0.0;
-    final confidence = ((hasBodyLine ? 0.74 : 0.62) +
-            (heightRatio - 1.0).clamp(0.0, 0.18) +
-            lengthScore +
-            lineScore)
-        .clamp(0.45, 0.98);
+    final confidence =
+        ((hasBodyLine ? 0.74 : 0.62) +
+                (heightRatio - 1.0).clamp(0.0, 0.18) +
+                lengthScore +
+                lineScore)
+            .clamp(0.45, 0.98);
 
     return ExtractedTitleInfo(title: title, confidence: confidence);
   }
@@ -369,7 +424,8 @@ class PdfCatalogBuilderService {
     if (nextText.isEmpty || _isHappyChurch(nextText)) return false;
 
     final heightRatio = next.height / (line.height == 0 ? 1 : line.height);
-    final closeInLineSpacing = (next.centerY - line.centerY).abs() <=
+    final closeInLineSpacing =
+        (next.centerY - line.centerY).abs() <=
         (line.height * 3.2).clamp(0.04, 0.18);
     final aligned =
         (next.pieces.first.left - line.pieces.first.left).abs() < 0.12;
@@ -484,8 +540,11 @@ class PdfCatalogBuilderService {
 
   bool _isDateText(String value) {
     final text = _normalize(value);
-    return RegExp(r'(^|\s)\d{1,2}\s*/\s*\d{1,2}(\s|$)').hasMatch(text) ||
-        RegExp(r'(^|\s)\d{1,2}\s*월\s*\d{1,2}\s*일?(\s|$)').hasMatch(text);
+    if (RegExp(r'(^|\s)\d{1,2}\s*월\s*\d{1,2}\s*일?(\s|$)').hasMatch(text) ||
+        RegExp(r'(^|\s)\d{1,2}\s*[.-]\s*\d{1,2}(\s|$)').hasMatch(text)) {
+      return true;
+    }
+    return RegExp(r'(^|\s)\d{1,2}\s*/\s*\d{1,2}(\s|$)').hasMatch(text);
   }
 
   bool _isHappyChurch(String value) {
@@ -495,6 +554,9 @@ class PdfCatalogBuilderService {
 
   bool _isScriptureReference(String value) {
     final text = _normalize(value);
+    if (RegExp(r'\b\d{1,3}\s*장\s*\d{1,3}\s*절?\b').hasMatch(text)) {
+      return true;
+    }
     if (RegExp(r'\b\d{1,3}\s*[:：]\s*\d{1,3}\b').hasMatch(text)) {
       return true;
     }
@@ -509,6 +571,8 @@ class PdfCatalogBuilderService {
     if (_isScriptureReference(text)) return true;
     if (RegExp(r'[.,!?;:“”‘’"()]').hasMatch(text)) return true;
     if (text.length > 36 || text.split(RegExp(r'\s+')).length > 10) return true;
+    final hangulCount = RegExp(r'[\uAC00-\uD7A3]').allMatches(text).length;
+    if (hangulCount >= 26) return true;
     const bodyStarts = [
       '근신하라',
       '깨어라',
@@ -637,6 +701,14 @@ class PdfCatalogBuilderService {
     }
 
     var value = unique.join(' ');
+
+    final tokens = value.split(RegExp(r'\s+'));
+    final singleCharacterTokens = tokens
+        .where((token) => token.runes.length == 1)
+        .length;
+    if (tokens.length >= 4 && singleCharacterTokens / tokens.length >= 0.75) {
+      value = tokens.join();
+    }
 
     // 한국어 조사가 별도 조각으로 분리된 경우 앞 단어에 자연스럽게 복원 연결
     // 예: "고난" + "을" -> "고난을", "움직임" + "을" -> "움직임을", "하나님의" + "뜻" + "을" -> "하나님의 뜻을"

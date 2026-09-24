@@ -5,13 +5,21 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:pdfrx/pdfrx.dart' as pdfrx;
 
+import '../services/date_page_mapper.dart';
 import '../services/pdf_cache_service.dart';
+import '../services/pdf_catalog_service.dart';
 
 class PdfPage extends StatefulWidget {
   final String title;
   final int page;
+  final int? year;
 
-  const PdfPage({super.key, required this.title, required this.page});
+  const PdfPage({
+    super.key,
+    required this.title,
+    required this.page,
+    this.year,
+  });
 
   @override
   State<PdfPage> createState() => _PdfPageState();
@@ -23,12 +31,48 @@ class _PdfPageState extends State<PdfPage> {
   final PdfCacheService cache = PdfCacheService();
   late int page;
   late Future<File> pdfFuture;
+  late String title;
+
+  final PdfCatalogService catalog = PdfCatalogService.instance;
 
   @override
   void initState() {
     super.initState();
     page = widget.page.clamp(1, fallbackTotalPages);
+    title = widget.title;
     pdfFuture = cache.getCachedPdf();
+    _refreshTitleForPage(page);
+  }
+
+  String? _titleForPage(int pdfPage) {
+    if (!DatePageMapper.isDailyPage(pdfPage)) return null;
+
+    try {
+      final date = DatePageMapper.dateForPdfPage(
+        pdfPage,
+        year: widget.year ?? DateTime.now().year,
+      );
+      return catalog.formatTitleForDate(date);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _refreshTitleForPage(int pdfPage) async {
+    final immediateTitle = _titleForPage(pdfPage);
+    if (mounted && page == pdfPage && immediateTitle != null) {
+      setState(() => title = immediateTitle);
+    }
+
+    try {
+      await catalog.loadTitles();
+      final loadedTitle = _titleForPage(pdfPage);
+      if (mounted && page == pdfPage && loadedTitle != null) {
+        setState(() => title = loadedTitle);
+      }
+    } catch (_) {
+      // The initial title remains visible when the catalog is unavailable.
+    }
   }
 
   @override
@@ -37,7 +81,7 @@ class _PdfPageState extends State<PdfPage> {
       appBar: AppBar(
         toolbarHeight: 72,
         title: Text(
-          widget.title,
+          title,
           maxLines: 2,
           softWrap: true,
           overflow: TextOverflow.ellipsis,
@@ -75,9 +119,14 @@ class _PdfPageState extends State<PdfPage> {
             file: snapshot.data!,
             initialPage: page,
             onPageChanged: (newPage) {
-              if (mounted && page != newPage) {
-                setState(() => page = newPage);
-              }
+              if (!mounted || page == newPage) return;
+
+              final nextTitle = _titleForPage(newPage);
+              setState(() {
+                page = newPage;
+                if (nextTitle != null) title = nextTitle;
+              });
+              _refreshTitleForPage(newPage);
             },
           );
         },

@@ -125,7 +125,7 @@ class _AdminTitleCatalogPageState extends State<AdminTitleCatalogPage> {
       });
 
       await _saveCatalog(
-        source: 'admin-auto-build-v3',
+        source: 'admin-auto-build-v4',
         confidences: result.confidences,
         lowConfidenceKeys: result.lowConfidenceKeys,
       );

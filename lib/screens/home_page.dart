@@ -103,7 +103,11 @@ class _HomePageState extends State<HomePage> {
     await Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => PdfPage(title: title, page: page),
+        builder: (_) => PdfPage(
+          title: title,
+          page: page,
+          year: date.year,
+        ),
       ),
     );
 
