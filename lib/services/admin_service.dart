@@ -1,17 +1,30 @@
-import 'package:firebase_auth/firebase_auth.dart';
+import 'local_profile_service.dart';
 
-/// IMPORTANT:
-/// This service intentionally does NOT contain a real approval code.
-/// For production, the code must be verified by a trusted backend/Cloud Function
-/// or another server-side mechanism. Never put a real admin secret in Flutter code.
-///
-/// The Firebase account used here is only for the administrator and is invisible
-/// to normal users. The UI asks for an approval code first; after server-side
-/// verification, the app can sign the admin in with a custom token.
 class AdminService {
-  final FirebaseAuth _auth = FirebaseAuth.instance;
+  AdminService._();
+  static final AdminService instance = AdminService._();
+  factory AdminService() => instance;
 
-  bool get isSignedInAsAdmin => _auth.currentUser != null;
+  final LocalProfileService _profileService = LocalProfileService();
 
-  Future<void> signOut() => _auth.signOut();
+  // 기본 관리자 승인코드
+  static const String defaultAdminCode = '123456';
+
+  /// 현재 관리자 모드 활성화 여부
+  Future<bool> get isSignedInAsAdmin => _profileService.isAdminMode();
+
+  /// 6자리 승인코드 검증
+  bool verifyAdminCode(String inputCode) {
+    return inputCode.trim() == defaultAdminCode;
+  }
+
+  /// 관리자 모드 정식 입장
+  Future<void> signInAsAdmin() async {
+    await _profileService.setAdminMode(true);
+  }
+
+  /// 관리자 모드 종료 / 로그아웃
+  Future<void> signOut() async {
+    await _profileService.setAdminMode(false);
+  }
 }

@@ -32,12 +32,11 @@ The Word DatePDF는 날짜를 기준으로 365일 묵상 PDF의 해당 페이지
 
 # 2. 최종 방향
 
-초기에는 PDF 안의 묵상 제목을 자동 OCR로 읽으려고 했지만,
-손글씨/캘리그라피/혼합 폰트 때문에 인식률과 속도가 안정적이지 않았습니다.
+제목은 일반 사용자 화면에서 매번 OCR하지 않습니다.
+관리자 화면에서 PDF 365페이지를 한 번 분석하고, 날짜별 제목과 confidence를 저장합니다.
+분석은 PDF 구조·위치·글자 크기·문맥을 먼저 사용하며 Android/iOS에서는 필요한 경우 OCR로 보완합니다.
 
-따라서 **최종 버전에서는 제목 자동 추출을 사용하지 않습니다.**
-
-사용자 화면에서는 다음과 같이 단순하게 표시합니다.
+사용자 화면은 저장된 제목 카탈로그만 조회합니다.
 
 ```text
 오늘의 말씀
@@ -114,28 +113,20 @@ The Word DatePDF는 날짜를 기준으로 365일 묵상 PDF의 해당 페이지
 
 # 5. 최종 관리자 센터
 
-제목/OCR 기능은 제거했으므로 관리자 화면에도 제목 관련 메뉴가 없습니다.
-
-현재 관리자 센터 방향:
+관리자 센터에는 제목 카탈로그와 검수 화면이 포함됩니다.
 
 ```text
 관리자 센터
 
 📄 PDF 관리
 📅 날짜 / 페이지 관리
+📝 제목 카탈로그 & 검수
 📊 방문 통계
 🕘 최근 이용 기록
 💬 QnA 관리
 ```
 
-제거된 기능:
-
-```text
-제목 카탈로그 관리
-365개 제목 자동 생성
-OCR 제목 검수
-AI 제목 추출
-```
+제목 confidence가 낮은 항목은 검수 목록에서 날짜별로 확인·수정할 수 있습니다.
 
 ---
 
@@ -195,9 +186,9 @@ Date-Pdf/
 
 ---
 
-# 8. 더 이상 필요 없는 OCR/제목 파일
+# 8. 제목 분석 파일
 
-최종 방향에서는 아래 파일은 필요하지 않습니다.
+제목 분석과 검수에는 아래 파일을 사용합니다.
 
 ```text
 lib/screens/admin_title_catalog_page.dart
@@ -207,7 +198,7 @@ lib/services/pdf_catalog_service.dart
 lib/services/pdf_catalog_builder_service.dart
 ```
 
-프로젝트에 남아 있다면 먼저 import 여부를 확인합니다.
+이 파일들은 관리자 분석 작업과 카탈로그 표시에서 사용되므로 삭제하지 않습니다.
 
 PowerShell:
 
@@ -222,14 +213,13 @@ Select-String "pdf_title_service|pdf_catalog_service|pdf_catalog_builder_service
 
 ---
 
-# 9. ML Kit 제거
+# 9. ML Kit 제목 보완 분석
 
-최종 버전에서는 제목 OCR을 사용하지 않습니다.
-
-따라서 설치되어 있다면 제거합니다.
+ML Kit는 일반 사용자 화면이 아니라 관리자 제목 분석 작업에서만 사용합니다.
+Android/iOS 관리자 빌드에는 다음 패키지가 필요합니다.
 
 ```powershell
-flutter pub remove google_mlkit_text_recognition
+google_mlkit_text_recognition: ^0.17.1
 ```
 
 `android/app/build.gradle.kts`에 아래 줄이 남아 있다면 삭제합니다.
@@ -1260,20 +1250,19 @@ await initializeDateFormatting('ko_KR', null);
 
 ---
 
-# 49. 최종적으로 사용하지 않는 기능
+# 49. 제목 분석의 현재 구조
 
-현재 최종 방향에서는 아래 기능을 사용하지 않습니다.
+제목 분석은 일반 사용자 화면에서 매번 실행하지 않고, 관리자가 PDF를 등록하거나 제목 카탈로그를 갱신할 때만 실행합니다. 레이아웃 기반 후보 추출과 Google ML Kit OCR을 함께 사용하고, 관리자가 결과를 검수·수정할 수 있습니다.
 
 ```text
-PDF 제목 OCR
-Google ML Kit 제목 인식
-AI Vision 제목 인식
-제목 카탈로그
-제목 Firestore 저장
-사용자 화면 제목 자동 추출
+관리자 PDF 등록/카탈로그 갱신
+→ 날짜·본문·구절 사이의 제목 영역 후보 추출
+→ OCR 후보를 읽기 순서와 문맥에 맞게 병합
+→ 제목/신뢰도 저장
+→ 일반 사용자 화면은 저장된 카탈로그만 조회
 ```
 
-이 기능 때문에 추가했던 패키지/서비스는 정리하는 것이 좋습니다.
+Firebase 모드에서는 Firestore에 저장하고, NAS 모드에서는 `/api/catalog/current` API에 저장합니다. 제목을 확신할 수 없는 항목은 낮은 confidence로 표시하여 관리자 검수를 유도합니다.
 
 ---
 
@@ -1850,10 +1839,10 @@ PDF 내부 스크롤
 코드:
 
 ```text
-[ ] OCR 관련 파일 제거
-[ ] ML Kit 패키지 제거
-[ ] admin_title_catalog_page.dart 제거
-[ ] 관리자 화면에서 제목 메뉴 제거
+[ ] 제목 분석/검수 파일 유지
+[ ] ML Kit 패키지와 Android/iOS 권한 확인
+[ ] admin_title_catalog_page.dart에서 낮은 confidence 검수
+[ ] 관리자 PDF 등록 후 제목 카탈로그 저장 확인
 [ ] 직접 클릭만 조회수 기록
 [ ] PDF 스크롤은 조회수 미기록
 [ ] 찾아보기 한국어 날짜 표시
@@ -1908,7 +1897,7 @@ QnA
 관리자 센터
 ```
 
-제목 자동 추출은 사용하지 않습니다.
+제목 자동 추출은 관리자 작업에서만 실행하며, 일반 사용자 화면에서는 저장된 카탈로그만 읽습니다.
 
 ---
 
@@ -1931,14 +1920,14 @@ QnA
 - Firestore `(default)` 데이터베이스 필요 확인
 - 제목 OCR 방식 테스트
 - 손글씨/혼합 폰트 제목 인식 한계 확인
-- 제목 자동 추출 최종 제거 결정
+- 레이아웃 기반 제목 자동 추출과 관리자 검수 화면 추가
 - 사용자 UI를 `오늘의 말씀` 중심으로 단순화
 - `일정` → `찾아보기`
 - `많이 방문한 페이지` → `많이 본 말씀`
 - `최근 본 페이지` → `최근 본 말씀`
 - 직접 클릭 조회수 정책 적용
 - PDF 내부 스크롤 조회수 제외
-- 관리자 제목/OCR 메뉴 제거
+- 관리자 제목 카탈로그/OCR 메뉴 유지 및 검수 흐름 문서화
 - 최종 GitHub 백업/업로드 절차 문서화
 
 ---
@@ -1956,3 +1945,323 @@ QnA
 ```
 
 이 문서를 현재 프로젝트의 최종 기준 README로 사용합니다.
+
+---
+
+# 74. NAS 백엔드 지원 (최신 추가)
+
+Firebase를 계속 사용할 수도 있고, 같은 앱을 NAS의 HTTP/HTTPS API로 실행할 수도 있습니다.
+앱을 다시 빌드할 때 `DATEPDF_BACKEND`만 바꾸면 됩니다. 기본값은 `firebase`입니다.
+
+```text
+Firebase 모드 (기본)
+Flutter → Firebase Storage / Firestore
+
+NAS 모드
+Flutter → NAS HTTPS API → NAS 파일/데이터베이스
+```
+
+Flutter 앱에서 SMB 공유 폴더를 직접 마운트하는 방식은 Android/iOS 권한과 네트워크 정책 차이가 커서 사용하지 않습니다. NAS에는 작은 HTTP API를 두고 PDF, 제목 카탈로그, 조회수, QnA, 설정을 같은 계약으로 제공하는 방식이 안정적입니다.
+
+## 74.1 NAS 모드 실행 설정
+
+```powershell
+flutter pub get
+
+flutter run `
+  --dart-define=DATEPDF_BACKEND=nas `
+  --dart-define=DATEPDF_NAS_BASE_URL=https://nas.example.com/datepdf `
+  --dart-define=DATEPDF_NAS_TOKEN=change-me
+```
+
+빌드할 때도 같은 값을 지정합니다.
+
+```powershell
+flutter build apk --release `
+  --dart-define=DATEPDF_BACKEND=nas `
+  --dart-define=DATEPDF_NAS_BASE_URL=https://nas.example.com/datepdf `
+  --dart-define=DATEPDF_NAS_TOKEN=change-me
+```
+
+관련 코드:
+
+```text
+lib/services/backend_config.dart
+lib/services/nas_api_client.dart
+python/nas_api.py
+python/nas_requirements.txt
+python/Dockerfile.nas
+```
+
+토큰과 NAS 주소를 Dart 소스에 직접 적지 않습니다. HTTPS와 만료 가능한 토큰 또는 NAS 앞단의 reverse proxy 인증을 사용합니다.
+
+## 74.2 NAS 파일 구조 권장안
+
+```text
+/srv/datepdf/
+├── data/
+│   ├── current.pdf
+│   ├── pdf_metadata.json
+│   ├── catalog.json
+│   ├── settings.json
+│   ├── qna.json
+│   └── stats.json
+└── backups/
+    ├── 2026-09-24-current.pdf
+    └── 2026-09-24-catalog.json
+```
+
+PDF 교체는 임시 파일에 업로드한 뒤 검증하고 `current.pdf`를 원자적으로 교체합니다. 기존 PDF와 catalog.json은 날짜별로 백업합니다.
+
+## 74.2.1 제공되는 NAS 서버 실행 방법
+
+저장소에 포함된 `python/nas_api.py`는 별도 데이터베이스 없이 위 계약을 처리하는 FastAPI 서버입니다. Synology/QNAP의 Docker 또는 Python 3.10 이상 환경에서 실행할 수 있습니다.
+
+```powershell
+cd python
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r nas_requirements.txt
+$env:DATEPDF_NAS_ROOT = "D:\\datepdf-nas"
+$env:DATEPDF_NAS_TOKEN = "긴-관리-토큰"
+python nas_api.py
+```
+
+Docker를 지원하는 NAS에서는 다음처럼 데이터 폴더를 영속 볼륨으로 연결할 수 있습니다.
+
+```bash
+cd python
+docker build -f Dockerfile.nas -t datepdf-nas .
+docker run -d --name datepdf-nas --restart unless-stopped \
+  -p 8787:8787 \
+  -v /volume1/datepdf:/data \
+  -e DATEPDF_NAS_TOKEN='긴-관리-토큰' \
+  datepdf-nas
+```
+
+Linux/NAS에서는 다음처럼 실행합니다.
+
+```bash
+cd python
+python3 -m venv .venv
+. .venv/bin/activate
+pip install -r nas_requirements.txt
+export DATEPDF_NAS_ROOT=/srv/datepdf
+export DATEPDF_NAS_TOKEN='긴-관리-토큰'
+python nas_api.py
+```
+
+`DATEPDF_NAS_ROOT` 아래에 `data/`와 `backups/`가 자동으로 만들어집니다. 서버 앞에 HTTPS reverse proxy를 두고, 앱의 `DATEPDF_NAS_BASE_URL`에는 reverse proxy의 `/datepdf` 주소를 넣습니다. 토큰을 비워 두면 인증이 꺼지므로 테스트 환경에서만 사용합니다.
+
+## 74.3 NAS API 계약
+
+모든 경로는 `DATEPDF_NAS_BASE_URL`을 기준으로 합니다. 인증이 필요한 요청은 다음 헤더를 사용합니다.
+
+```http
+Authorization: Bearer <DATEPDF_NAS_TOKEN>
+```
+
+### PDF
+
+```http
+GET /api/pdf/current
+GET /api/pdf/current/metadata
+POST /api/pdf/current       multipart field: file
+```
+
+`GET /api/pdf/current`는 `application/pdf` 바이너리를 반환합니다. JSON을 반환하는 경우에는 다음처럼 다운로드 주소를 포함할 수 있습니다.
+
+```json
+{
+  "downloadUrl": "https://nas.example.com/datepdf/files/current.pdf",
+  "fileName": "365일 매일묵상말씀.pdf",
+  "version": "2026-09-24T10:00:00Z"
+}
+```
+
+`GET /api/pdf/current/metadata` 응답:
+
+```json
+{
+  "fileName": "365일 매일묵상말씀.pdf",
+  "fileSize": 12345678,
+  "updatedAt": "2026-09-24T10:00:00Z"
+}
+```
+
+### 제목 카탈로그
+
+```http
+GET /api/catalog/current
+PUT /api/catalog/current
+```
+
+응답과 저장 형식은 Firebase의 `pdf_catalog/current`와 동일하게 유지합니다.
+
+```json
+{
+  "year": 2026,
+  "startPage": 4,
+  "pageCount": 365,
+  "titleAlgorithmVersion": 3,
+  "titles": {
+    "01-02": "고난을 통과하면서",
+    "01-20": "근심과 불안으로부터 소망이 필요할 때",
+    "09-13": "움직임을 가질 때",
+    "10-27": "하나님의 뜻을 행하는 자"
+  },
+  "confidences": {
+    "01-02": 0.97,
+    "01-20": 0.91
+  },
+  "lowConfidenceKeys": []
+}
+```
+
+제목 분석은 관리자 작업에서만 수행합니다. 일반 사용자는 이 JSON만 읽습니다.
+`titleAlgorithmVersion`이 앱의 현재 버전보다 낮으면 관리자 화면에 재분석 경고가 표시됩니다. 기존 카탈로그를 자동으로 덮어쓰지 않으므로, 분석 후 관리자가 결과를 확인하고 저장해야 합니다.
+
+### 조회수
+
+```http
+POST /api/stats/direct-open
+GET /api/stats/top?limit=10
+```
+
+직접 PDF에 진입할 때의 요청:
+
+```json
+{
+  "page": 269,
+  "openedAt": "2026-09-24T10:00:00Z"
+}
+```
+
+Top 응답:
+
+```json
+{
+  "items": [
+    {"page": 269, "views": 12},
+    {"page": 8, "views": 9}
+  ]
+}
+```
+
+서버는 `page`를 기본 키로 두고 증가 연산을 원자적으로 처리해야 합니다. 앱은 네트워크가 끊겨도 로컬 조회수를 먼저 표시하고, NAS 연결이 복구되면 서버 요청을 재시도할 수 있도록 구현되어 있습니다.
+
+### 날짜/페이지 설정
+
+```http
+GET /api/settings/pdf
+PUT /api/settings/pdf
+```
+
+```json
+{
+  "dailyStartPdfPage": 4,
+  "dailyPageCount": 365,
+  "pdfFileName": "365일 매일묵상말씀.pdf",
+  "updatedAt": "2026-09-24T10:00:00Z"
+}
+```
+
+### QnA
+
+```http
+GET  /api/qna
+POST /api/qna
+PUT  /api/qna/{id}
+```
+
+질문 객체는 Firebase의 `qna` 문서 필드와 같은 JSON 이름을 사용합니다.
+
+```json
+{
+  "id": "question-id",
+  "title": "질문 제목",
+  "content": "질문 내용",
+  "authorName": "사용자",
+  "createdAt": "2026-09-24T10:00:00Z",
+  "answer": null,
+  "answeredAt": null,
+  "isAnswered": false,
+  "isReadByAdmin": false
+}
+```
+
+NAS 모드의 QnA 스트림은 30초 polling 방식입니다. 실시간 WebSocket이 필요하면 이 API 뒤에 WebSocket/SSE를 추가하고 `QnaService`만 교체하면 됩니다.
+
+## 74.4 NAS 서버 구현 체크리스트
+
+```text
+[x] `python/nas_api.py` 기본 API 구현
+[x] JSON 원자적 저장과 조회수 증가 잠금 구현
+[x] current.pdf 임시 업로드 후 원자적 교체 구현
+[ ] HTTPS reverse proxy 구성
+[ ] Bearer 토큰 또는 VPN 인증 적용
+[ ] current.pdf 원자적 교체
+[ ] catalog.json 동시 수정 잠금
+[ ] 조회수 증가의 원자성 보장
+[ ] 일별 PDF/catalog 백업
+[ ] CORS 또는 모바일 요청 허용 설정
+[ ] 4xx/5xx 응답에 JSON 오류 메시지 제공
+[ ] PDF 응답 Content-Type: application/pdf
+[ ] 큰 PDF 다운로드 Range 요청 지원 권장
+```
+
+앱은 NAS API의 관리자 인증을 대신하지 않습니다. NAS API에서 읽기와 쓰기 권한을 분리하고, 제목 분석·PDF 업로드·조회수 기록·QnA 답변을 각각 서버에서 검증해야 합니다.
+
+## 74.5 Firebase에서 NAS로 옮기는 순서
+
+```text
+1. Firebase에서 PDF, pdf_catalog/current, pdf_settings/config, qna, page_stats 백업
+2. NAS에 current.pdf와 JSON 데이터 설치
+3. 위 API 계약으로 NAS 서버 구현
+4. GET API를 curl/Postman으로 먼저 검증
+5. DATEPDF_BACKEND=nas로 디버그 앱 실행
+6. 날짜 선택, PDF 열기, 제목 표시, 조회수, QnA를 확인
+7. 관리자 제목 분석을 한 번 실행하고 catalog.json 백업
+8. release APK를 NAS 설정으로 빌드
+```
+
+현재 소스는 Firebase 모드를 기본으로 유지하므로 기존 배포 앱을 중단하지 않고 NAS 모드를 별도 APK로 검증할 수 있습니다.
+
+## 75. Android Studio 테스트 상태와 실제 배포 상태
+
+Android Studio에서 `Run` 또는 `Hot Reload`로 보이는 변경은 현재 연결된 기기의 디버그 프로세스에 적용된 상태입니다. 이 상태 자체가 APK나 GitHub에 저장되는 것은 아닙니다.
+
+```text
+저장된 Dart 소스
+→ flutter run / Hot Reload
+→ 현재 기기의 디버그 앱에 임시 반영
+
+저장된 Dart 소스 + 커밋된 파일
+→ flutter build apk --release
+→ 새 릴리스 APK
+→ GitHub에는 commit된 파일만 업로드
+```
+
+따라서 다음을 구분해야 합니다.
+
+- 파일을 저장하지 않은 편집 내용은 빌드와 GitHub에 포함되지 않습니다.
+- 커밋하지 않은 변경은 GitHub에 포함되지 않습니다.
+- 기기에 남아 있는 SharedPreferences, PDF 캐시, 제목 카탈로그는 새 APK를 설치해도 보통 유지됩니다.
+- 제목 분석 알고리즘을 바꾼 뒤에는 관리자 화면에서 `PDF 전체 365일 제목 분석 다시 실행` 후 저장해야 기존 제목 데이터가 교체됩니다.
+
+릴리스 APK를 새 상태로 확인하려면 프로젝트 루트에서 실행합니다.
+
+```powershell
+flutter clean
+flutter pub get
+flutter build apk --release
+```
+
+기존 테스트 데이터를 완전히 지우고 확인할 때만 다음을 사용합니다. 앱의 로컬 이름, 최근 기록, PDF 캐시도 삭제됩니다.
+
+```powershell
+adb uninstall com.example.date_pdf
+flutter install --release
+```
+
+NAS 배포 APK는 `DATEPDF_BACKEND`, `DATEPDF_NAS_BASE_URL`, `DATEPDF_NAS_TOKEN`을 `--dart-define`으로 지정하여 별도로 빌드해야 합니다. GitHub에 올리기 전에는 `git status`, `git diff --cached --check`, `git commit`까지 완료해야 변경 내용이 원격 저장소에 포함됩니다.

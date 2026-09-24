@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../services/admin_service.dart';
 import '../services/local_profile_service.dart';
 import 'admin_code_page.dart';
 import 'admin_page.dart';
@@ -22,12 +23,21 @@ class SettingsPage extends StatefulWidget {
 
 class _SettingsPageState extends State<SettingsPage> {
   final profile = LocalProfileService();
+  final adminService = AdminService.instance;
   late bool adminMode;
 
   @override
   void initState() {
     super.initState();
     adminMode = widget.adminMode;
+    _checkAdminState();
+  }
+
+  Future<void> _checkAdminState() async {
+    final signedIn = await adminService.isSignedInAsAdmin;
+    if (mounted && signedIn != adminMode) {
+      setState(() => adminMode = signedIn);
+    }
   }
 
   Future<void> _changeName() async {
@@ -57,11 +67,15 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Future<void> _adminEntry() async {
-    if (adminMode) {
+    final signedIn = await adminService.isSignedInAsAdmin;
+    if (!mounted) return;
+
+    if (signedIn || adminMode) {
       await Navigator.push(
         context,
         MaterialPageRoute(builder: (_) => const AdminPage()),
       );
+      _syncAdminState();
       return;
     }
 
@@ -75,10 +89,24 @@ class _SettingsPageState extends State<SettingsPage> {
       if (!mounted) return;
       setState(() => adminMode = true);
       widget.onChanged();
+      await Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const AdminPage()),
+      );
+      _syncAdminState();
+    }
+  }
+
+  Future<void> _syncAdminState() async {
+    final signedIn = await adminService.isSignedInAsAdmin;
+    if (mounted && adminMode != signedIn) {
+      setState(() => adminMode = signedIn);
+      widget.onChanged();
     }
   }
 
   Future<void> _exitAdmin() async {
+    await adminService.signOut();
     await profile.setAdminMode(false);
     if (!mounted) return;
     setState(() => adminMode = false);
@@ -127,8 +155,10 @@ class _SettingsPageState extends State<SettingsPage> {
           Card(
             child: ListTile(
               leading: Icon(adminMode ? Icons.admin_panel_settings : Icons.lock_outline),
-              title: Text(adminMode ? '관리자 모드' : '관리자 모드'),
-              subtitle: Text(adminMode ? '현재 활성화됨' : '승인코드로 관리자 기능 사용'),
+              title: const Text('관리자 모드'),
+              subtitle: Text(
+                adminMode ? '현재 활성화됨 (관리자 전용 기능)' : '승인코드로 관리자 기능 사용',
+              ),
               trailing: const Icon(Icons.chevron_right),
               onTap: _adminEntry,
             ),
@@ -137,8 +167,8 @@ class _SettingsPageState extends State<SettingsPage> {
             const SizedBox(height: 8),
             Card(
               child: ListTile(
-                leading: const Icon(Icons.logout),
-                title: const Text('관리자 모드 종료'),
+                leading: const Icon(Icons.logout, color: Colors.red),
+                title: const Text('관리자 모드 종료', style: TextStyle(color: Colors.red)),
                 onTap: _exitAdmin,
               ),
             ),
@@ -155,7 +185,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
                 ListTile(
                   title: Text('현재 PDF'),
-                  trailing: Text('v1'),
+                  trailing: Text('365일 매일묵상말씀.pdf'),
                 ),
               ],
             ),

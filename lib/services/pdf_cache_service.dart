@@ -4,6 +4,9 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'backend_config.dart';
+import 'nas_api_client.dart';
+
 class PdfCacheService {
   PdfCacheService._();
   static final PdfCacheService instance = PdfCacheService._();
@@ -16,7 +19,9 @@ class PdfCacheService {
 
   static const Duration metadataCheckInterval = Duration(hours: 6);
 
-  final FirebaseStorage _storage = FirebaseStorage.instance;
+  final NasApiClient _nas = NasApiClient.instance;
+
+  FirebaseStorage get _storage => FirebaseStorage.instance;
 
   File? _memoryFile;
   Future<File>? _loading;
@@ -43,15 +48,21 @@ class PdfCacheService {
     final file = File('${cacheDir.path}/$_cacheFileName');
     final prefs = await SharedPreferences.getInstance();
 
+    if (BackendConfig.useNas) {
+      return _loadFromNas(
+        file: file,
+        prefs: prefs,
+        forceRefresh: forceRefresh,
+      );
+    }
+
     if (!forceRefresh && await file.exists()) {
       final lastCheckMillis = prefs.getInt(_lastCheckKey);
 
       if (lastCheckMillis != null) {
-        final lastCheck =
-            DateTime.fromMillisecondsSinceEpoch(lastCheckMillis);
+        final lastCheck = DateTime.fromMillisecondsSinceEpoch(lastCheckMillis);
 
-        if (DateTime.now().difference(lastCheck) <
-            metadataCheckInterval) {
+        if (DateTime.now().difference(lastCheck) < metadataCheckInterval) {
           _memoryFile = file;
           return file;
         }
@@ -69,8 +80,7 @@ class PdfCacheService {
           DateTime.now().millisecondsSinceEpoch,
         );
 
-        if (remoteGeneration == null ||
-            remoteGeneration == localGeneration) {
+        if (remoteGeneration == null || remoteGeneration == localGeneration) {
           _memoryFile = file;
           return file;
         }
@@ -108,6 +118,41 @@ class PdfCacheService {
       DateTime.now().millisecondsSinceEpoch,
     );
 
+    _memoryFile = file;
+    return file;
+  }
+
+  Future<File> _loadFromNas({
+    required File file,
+    required SharedPreferences prefs,
+    required bool forceRefresh,
+  }) async {
+    if (!forceRefresh && await file.exists()) {
+      final lastCheckMillis = prefs.getInt(_lastCheckKey);
+      if (lastCheckMillis != null &&
+          DateTime.now().difference(
+                DateTime.fromMillisecondsSinceEpoch(lastCheckMillis),
+              ) <
+              metadataCheckInterval) {
+        _memoryFile = file;
+        return file;
+      }
+    }
+
+    try {
+      await _nas.downloadPdf(file);
+      await prefs.setInt(
+        _lastCheckKey,
+        DateTime.now().millisecondsSinceEpoch,
+      );
+    } catch (_) {
+      // NAS가 잠시 끊겨도 기존 캐시가 있으면 앱을 계속 사용할 수 있습니다.
+      if (await file.exists()) {
+        _memoryFile = file;
+        return file;
+      }
+      rethrow;
+    }
     _memoryFile = file;
     return file;
   }

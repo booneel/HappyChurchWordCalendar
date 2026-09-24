@@ -200,9 +200,11 @@ class PdfTitleService {
           rotation: 0,
         );
 
-        recognizer = TextRecognizer(
-          script: TextRecognitionScript.korean,
-        );
+        try {
+          recognizer = TextRecognizer();
+        } catch (_) {
+          return null;
+        }
 
         final result = await recognizer.processImage(input);
         return _bestOcrCandidate(

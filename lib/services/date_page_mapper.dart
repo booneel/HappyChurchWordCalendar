@@ -1,8 +1,13 @@
-class DatePageMapper {
-  static const int dailyStartPdfPage = 4;
-  static const int dailyPageCount = 365;
+import 'pdf_settings_service.dart';
 
-  static int pdfPageForDate(DateTime date) {
+class DatePageMapper {
+  static int get dailyStartPdfPage =>
+      PdfSettingsService.instance.currentSettings.dailyStartPdfPage;
+
+  static int get dailyPageCount =>
+      PdfSettingsService.instance.currentSettings.dailyPageCount;
+
+  static int pdfPageForDate(DateTime date, {int? startPage}) {
     final yearStart = DateTime(date.year, 1, 1);
     final daysInYear =
         DateTime(date.year, 12, 31).difference(yearStart).inDays + 1;
@@ -13,23 +18,39 @@ class DatePageMapper {
       );
     }
 
+    final effectiveStart = startPage ?? dailyStartPdfPage;
     final dayOfYear = date.difference(yearStart).inDays + 1;
-    return dailyStartPdfPage + dayOfYear - 1;
+    return effectiveStart + dayOfYear - 1;
   }
 
-  static DateTime dateForPdfPage(int pdfPage, {required int year}) {
-    if (!isDailyPage(pdfPage)) {
+  static DateTime dateForPdfPage(
+    int pdfPage, {
+    required int year,
+    int? startPage,
+    int? pageCount,
+  }) {
+    final effectiveStart = startPage ?? dailyStartPdfPage;
+    final effectiveCount = pageCount ?? dailyPageCount;
+
+    if (!isDailyPage(pdfPage, startPage: effectiveStart, pageCount: effectiveCount)) {
       throw ArgumentError('일일 말씀 페이지 범위가 아닙니다: $pdfPage');
     }
 
     return DateTime(year, 1, 1).add(
-      Duration(days: pdfPage - dailyStartPdfPage),
+      Duration(days: pdfPage - effectiveStart),
     );
   }
 
-  static bool isDailyPage(int pdfPage) {
-    return pdfPage >= dailyStartPdfPage &&
-        pdfPage < dailyStartPdfPage + dailyPageCount;
+  static bool isDailyPage(
+    int pdfPage, {
+    int? startPage,
+    int? pageCount,
+  }) {
+    final effectiveStart = startPage ?? dailyStartPdfPage;
+    final effectiveCount = pageCount ?? dailyPageCount;
+
+    return pdfPage >= effectiveStart &&
+        pdfPage < effectiveStart + effectiveCount;
   }
 
   static String monthDayKey(DateTime date) {

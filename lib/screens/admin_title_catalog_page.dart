@@ -9,14 +9,11 @@ class AdminTitleCatalogPage extends StatefulWidget {
   const AdminTitleCatalogPage({super.key});
 
   @override
-  State<AdminTitleCatalogPage> createState() =>
-      _AdminTitleCatalogPageState();
+  State<AdminTitleCatalogPage> createState() => _AdminTitleCatalogPageState();
 }
 
-class _AdminTitleCatalogPageState
-    extends State<AdminTitleCatalogPage> {
-  final PdfCatalogService _catalog =
-      PdfCatalogService();
+class _AdminTitleCatalogPageState extends State<AdminTitleCatalogPage> {
+  final PdfCatalogService _catalog = PdfCatalogService.instance;
 
   PdfCatalogBuilderService? _builder;
 
@@ -28,8 +25,11 @@ class _AdminTitleCatalogPageState
   int current = 0;
   int total = DatePageMapper.dailyPageCount;
   String status = '';
+  String searchQuery = '';
+  String filterMode = 'all'; // 'all', 'review_needed'
 
   Map<String, String> titles = {};
+  Map<String, double> confidences = {};
   List<String> failed = [];
 
   @override
@@ -40,15 +40,15 @@ class _AdminTitleCatalogPageState
 
   Future<void> _load() async {
     try {
-      final catalog =
-          await _catalog.getEditableCatalog();
-      final catalogYear =
-          await _catalog.getCatalogYear();
+      final catalog = await _catalog.getEditableCatalog();
+      final confs = await _catalog.getEditableConfidences();
+      final catalogYear = await _catalog.getCatalogYear();
 
       if (!mounted) return;
 
       setState(() {
         titles = catalog;
+        confidences = confs;
         year = catalogYear;
         loading = false;
       });
@@ -69,23 +69,21 @@ class _AdminTitleCatalogPageState
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('365개 제목 자동 생성'),
+        title: const Text('365개 제목 비전/레이아웃 전체 분석'),
         content: const Text(
-          'PDF 전체 365일을 한 번 분석합니다.\n\n'
-          '이 작업은 관리자에서만 실행하며 시간이 걸릴 수 있습니다. '
-          '완료 후 일반 사용자 앱에서는 OCR을 실행하지 않습니다.\n\n'
-          '자동 인식이 틀린 항목은 아래 목록에서 직접 수정할 수 있습니다.',
+          'PDF 전체 365페이지의 레이아웃과 문맥을 한 번 분석합니다.\n\n'
+          '상단 날짜 아래 문구의 글꼴, 위치, 관계를 고려하여 제목 전체를 복원합니다.\n\n'
+          '완료 후 일반 사용자 앱에서는 전혀 분석을 실행하지 않으며, '
+          '확신도가 낮거나 검수가 필요한 항목은 🔴 배지로 강조 표시됩니다.',
         ),
         actions: [
           TextButton(
-            onPressed: () =>
-                Navigator.pop(context, false),
+            onPressed: () => Navigator.pop(context, false),
             child: const Text('취소'),
           ),
           FilledButton(
-            onPressed: () =>
-                Navigator.pop(context, true),
-            child: const Text('시작'),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('분석 시작'),
           ),
         ],
       ),
@@ -107,11 +105,7 @@ class _AdminTitleCatalogPageState
     try {
       final result = await builder.build(
         year: year,
-        onProgress: (
-          currentValue,
-          totalValue,
-          message,
-        ) {
+        onProgress: (currentValue, totalValue, message) {
           if (!mounted) return;
 
           setState(() {
@@ -126,11 +120,14 @@ class _AdminTitleCatalogPageState
 
       setState(() {
         titles = result.titles;
+        confidences = result.confidences;
         failed = result.failedKeys;
       });
 
       await _saveCatalog(
-        source: 'admin-auto-build',
+        source: 'admin-auto-build-v3',
+        confidences: result.confidences,
+        lowConfidenceKeys: result.lowConfidenceKeys,
       );
 
       if (!mounted) return;
@@ -138,16 +135,16 @@ class _AdminTitleCatalogPageState
       await showDialog<void>(
         context: context,
         builder: (_) => AlertDialog(
-          title: const Text('제목 생성 완료'),
+          title: const Text('제목 전체 분석 완료'),
           content: Text(
             '성공: ${result.successCount}개\n'
+            '🔴 검수 필요 (확신도 낮음): ${result.lowConfidenceCount}개\n'
             '미인식: ${result.failedCount}개\n\n'
-            '미인식 또는 틀린 제목은 목록에서 눌러 직접 수정하세요.',
+            '확신도가 낮거나 미인식된 항목은 [검수 필요] 탭에서 직접 확인/수정하세요.',
           ),
           actions: [
             FilledButton(
-              onPressed: () =>
-                  Navigator.pop(context),
+              onPressed: () => Navigator.pop(context),
               child: const Text('확인'),
             ),
           ],
@@ -167,6 +164,8 @@ class _AdminTitleCatalogPageState
 
   Future<void> _saveCatalog({
     String source = 'admin-edited',
+    Map<String, double>? confidences,
+    List<String>? lowConfidenceKeys,
   }) async {
     if (saving) return;
 
@@ -178,8 +177,15 @@ class _AdminTitleCatalogPageState
       await _catalog.saveWholeCatalog(
         year: year,
         titles: titles,
+        confidences: confidences ?? this.confidences,
+        lowConfidenceKeys: lowConfidenceKeys,
         source: source,
       );
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('제목 카탈로그가 저장되었습니다.')));
     } finally {
       if (mounted) {
         setState(() {
@@ -189,47 +195,43 @@ class _AdminTitleCatalogPageState
     }
   }
 
-  Future<void> _editTitle(
-    DateTime date,
-    int page,
-  ) async {
-    final key =
-        DatePageMapper.monthDayKey(date);
+  Future<void> _editTitle(DateTime date) async {
+    final key = DatePageMapper.monthDayKey(date);
 
-    final controller = TextEditingController(
-      text: titles[key] ?? '',
-    );
+    final controller = TextEditingController(text: titles[key] ?? '');
 
     final value = await showDialog<String>(
       context: context,
       builder: (_) => AlertDialog(
-        title: Text(
-          DateFormat(
-            'M월 d일 · PDF $page',
-            'ko_KR',
-          ).format(date),
-        ),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          maxLength: 30,
-          decoration: const InputDecoration(
-            labelText: '말씀 제목',
-            hintText: '예: 충성',
-          ),
+        title: Text(DateFormat('yyyy년 M월 d일', 'ko_KR').format(date)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
+              controller: controller,
+              autofocus: true,
+              maxLength: 40,
+              decoration: const InputDecoration(
+                labelText: '묵상 말씀 제목',
+                hintText: '예: 고난을 통과하면서 / 영생',
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              '관리자가 수동으로 수정/확인한 제목은 확신도 100%로 검수 완료 처리됩니다.',
+              style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+            ),
+          ],
         ),
         actions: [
           TextButton(
-            onPressed: () =>
-                Navigator.pop(context),
+            onPressed: () => Navigator.pop(context),
             child: const Text('취소'),
           ),
           FilledButton(
-            onPressed: () => Navigator.pop(
-              context,
-              controller.text.trim(),
-            ),
-            child: const Text('저장'),
+            onPressed: () => Navigator.pop(context, controller.text.trim()),
+            child: const Text('저장 및 검수 완료'),
           ),
         ],
       ),
@@ -240,18 +242,16 @@ class _AdminTitleCatalogPageState
     setState(() {
       if (value.isEmpty) {
         titles.remove(key);
+        confidences.remove(key);
       } else {
         titles[key] = value;
+        confidences[key] = 1.0; // 관리자 수동 검수 완료 100%
       }
 
       failed.remove(key);
     });
 
-    await _catalog.updateOneTitle(
-      year: year,
-      date: date,
-      title: value,
-    );
+    await _catalog.updateOneTitle(year: year, date: date, title: value);
   }
 
   void _showError(Object error) {
@@ -262,8 +262,7 @@ class _AdminTitleCatalogPageState
         content: SelectableText('$error'),
         actions: [
           FilledButton(
-            onPressed: () =>
-                Navigator.pop(context),
+            onPressed: () => Navigator.pop(context),
             child: const Text('확인'),
           ),
         ],
@@ -274,89 +273,135 @@ class _AdminTitleCatalogPageState
   @override
   Widget build(BuildContext context) {
     if (loading) {
-      return const Scaffold(
-        body: Center(
-          child: CircularProgressIndicator(),
-        ),
-      );
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
     final yearStart = DateTime(year, 1, 1);
+    final totalDays = DatePageMapper.dailyPageCount;
+
+    final allDays = List.generate(totalDays, (index) {
+      final date = yearStart.add(Duration(days: index));
+      final page = DatePageMapper.dailyStartPdfPage + index;
+      final key = DatePageMapper.monthDayKey(date);
+      final title = titles[key] ?? '';
+      final confidence = confidences[key] ?? 0.0;
+      final isLowConfidence = title.isEmpty || confidence < 0.80;
+
+      return (
+        date: date,
+        page: page,
+        key: key,
+        title: title,
+        confidence: confidence,
+        isLowConfidence: isLowConfidence,
+      );
+    });
+
+    final reviewNeededCount =
+        allDays.where((item) => item.isLowConfidence).length;
+
+    final filteredDays = allDays.where((item) {
+      if (filterMode == 'review_needed' && !item.isLowConfidence) {
+        return false;
+      }
+
+      if (searchQuery.isEmpty) return true;
+      final dateStr = DateFormat('yyyy년 M월 d일', 'ko_KR').format(item.date);
+      final shortDateStr = DateFormat('M/d', 'ko_KR').format(item.date);
+      return (dateStr.contains(searchQuery) ||
+              shortDateStr.contains(searchQuery)) ||
+          item.title.contains(searchQuery);
+    }).toList();
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('제목 카탈로그 관리'),
+        title: const Text('제목 카탈로그 & 검수 센터'),
         actions: [
           IconButton(
             tooltip: '저장',
-            onPressed:
-                saving || building ? null : _saveCatalog,
-            icon: const Icon(Icons.save_outlined),
+            onPressed: saving || building ? null : _saveCatalog,
+            icon: saving
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.save_outlined),
           ),
         ],
       ),
       body: Column(
         children: [
           Padding(
-            padding:
-                const EdgeInsets.fromLTRB(16, 8, 16, 8),
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
             child: Card(
               child: Padding(
                 padding: const EdgeInsets.all(16),
                 child: Column(
-                  crossAxisAlignment:
-                      CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(
                       children: [
                         const Expanded(
                           child: Text(
-                            '365일 제목 카탈로그',
+                            '365일 제목 검수 관리',
                             style: TextStyle(
-                              fontWeight:
-                                  FontWeight.w800,
+                              fontWeight: FontWeight.w800,
                               fontSize: 18,
                             ),
                           ),
                         ),
-                        Text('${titles.length}/365'),
+                        Text(
+                          '${titles.length}/$totalDays',
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
                       ],
                     ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 6),
                     Text(
-                      '일반 사용자는 이 목록만 읽으므로 '
-                      '제목 표시가 즉시 이루어집니다.',
+                      '일반 사용자 앱에서는 어떠한 이미지/OCR 분석도 실행하지 않으며, '
+                      '이 화면에서 관리자가 1회 분석 후 검수한 제목만 즉시 읽어옵니다.',
                       style: TextStyle(
                         color: Colors.grey.shade600,
+                        fontSize: 12.5,
                       ),
                     ),
+                    if (_catalog.needsTitleRebuild) ...[
+                      const SizedBox(height: 10),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: Colors.orange.shade50,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.orange.shade200),
+                        ),
+                        child: const Text(
+                          '기존 제목 카탈로그가 현재 분석 버전보다 오래되었습니다.\n'
+                          '아래의 전체 분석을 다시 실행한 뒤 저장해야 잘못 추출된 본문이 교체됩니다.',
+                          style: TextStyle(fontSize: 12.5),
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 14),
                     SizedBox(
                       width: double.infinity,
                       child: FilledButton.icon(
-                        onPressed:
-                            building ? null : _buildCatalog,
-                        icon: const Icon(
-                          Icons.auto_awesome,
-                        ),
-                        label: const Text(
-                          'PDF에서 365개 제목 자동 생성',
-                        ),
+                        onPressed: building ? null : _buildCatalog,
+                        icon: const Icon(Icons.auto_awesome),
+                        label: const Text('PDF 전체 365일 제목 분석 다시 실행'),
                       ),
                     ),
                     if (building) ...[
                       const SizedBox(height: 14),
                       LinearProgressIndicator(
-                        value:
-                            total == 0 ? 0 : current / total,
+                        value: total == 0 ? 0 : current / total,
                       ),
                       const SizedBox(height: 8),
                       Text('$current / $total'),
                       Text(
                         status,
-                        style: TextStyle(
-                          color: Colors.grey.shade600,
-                        ),
+                        style: TextStyle(color: Colors.grey.shade600),
                       ),
                       const SizedBox(height: 8),
                       TextButton.icon(
@@ -367,81 +412,133 @@ class _AdminTitleCatalogPageState
                         label: const Text('중단 요청'),
                       ),
                     ],
-                    if (failed.isNotEmpty) ...[
-                      const SizedBox(height: 10),
-                      Text(
-                        '미인식 ${failed.length}개 · '
-                        '목록에서 직접 입력할 수 있습니다.',
-                        style: TextStyle(
-                          color: Theme.of(context)
-                              .colorScheme
-                              .error,
-                        ),
-                      ),
-                    ],
                   ],
                 ),
               ),
             ),
           ),
-
-          Expanded(
-            child: ListView.separated(
-              itemCount:
-                  DatePageMapper.dailyPageCount,
-              separatorBuilder: (_, __) =>
-                  const Divider(height: 1),
-              itemBuilder: (context, index) {
-                final date = yearStart.add(
-                  Duration(days: index),
-                );
-                final page =
-                    DatePageMapper.dailyStartPdfPage +
-                        index;
-                final key =
-                    DatePageMapper.monthDayKey(date);
-
-                final title = titles[key];
-                final isFailed =
-                    failed.contains(key);
-
-                return ListTile(
-                  leading: SizedBox(
-                    width: 58,
-                    child: Text(
-                      DateFormat(
-                        'M/d',
-                        'ko_KR',
-                      ).format(date),
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                  title: Text(
-                    title?.isNotEmpty == true
-                        ? title!
-                        : '제목 미입력',
-                    style: TextStyle(
-                      fontWeight:
-                          FontWeight.w600,
-                      color: isFailed
-                          ? Theme.of(context)
-                              .colorScheme
-                              .error
-                          : null,
-                    ),
-                  ),
-                  subtitle: Text(
-                    'PDF $page',
-                  ),
-                  trailing:
-                      const Icon(Icons.edit_outlined),
-                  onTap: () =>
-                      _editTitle(date, page),
-                );
-              },
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              children: [
+                ChoiceChip(
+                  label: Text('전체 ($totalDays)'),
+                  selected: filterMode == 'all',
+                  onSelected: (_) => setState(() => filterMode = 'all'),
+                ),
+                const SizedBox(width: 8),
+                ChoiceChip(
+                  avatar: reviewNeededCount > 0
+                      ? const Icon(
+                          Icons.error_outline,
+                          size: 16,
+                          color: Colors.red,
+                        )
+                      : null,
+                  label: Text('🔴 검수 필요 ($reviewNeededCount)'),
+                  selected: filterMode == 'review_needed',
+                  selectedColor: Colors.red.shade100,
+                  onSelected: (_) =>
+                      setState(() => filterMode = 'review_needed'),
+                ),
+              ],
             ),
+          ),
+          const SizedBox(height: 8),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            child: TextField(
+              onChanged: (val) => setState(() => searchQuery = val.trim()),
+              decoration: InputDecoration(
+                hintText: '날짜 또는 제목 검색',
+                prefixIcon: const Icon(Icons.search),
+                suffixIcon: searchQuery.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear),
+                        onPressed: () => setState(() => searchQuery = ''),
+                      )
+                    : null,
+              ),
+            ),
+          ),
+          Expanded(
+            child: filteredDays.isEmpty
+                ? const Center(child: Text('검색 또는 검수 필요 항목이 없습니다.'))
+                : ListView.separated(
+                    itemCount: filteredDays.length,
+                    separatorBuilder: (_, __) => const Divider(height: 1),
+                    itemBuilder: (context, index) {
+                      final item = filteredDays[index];
+                      final confPercent =
+                          (item.confidence * 100).toStringAsFixed(0);
+
+                      return ListTile(
+                        tileColor:
+                            item.isLowConfidence ? Colors.amber.shade50 : null,
+                        leading: SizedBox(
+                          width: 112,
+                          child: Text(
+                            DateFormat('yyyy년 M월 d일', 'ko_KR')
+                                .format(item.date),
+                            style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              color: item.isLowConfidence
+                                  ? Colors.red.shade800
+                                  : null,
+                            ),
+                          ),
+                        ),
+                        title: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                item.title.isNotEmpty
+                                    ? item.title
+                                    : '제목 미입력 (확인 필요)',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  color: item.title.isEmpty
+                                      ? Colors.red
+                                      : Colors.black87,
+                                ),
+                              ),
+                            ),
+                            if (item.title.isNotEmpty) ...[
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 6,
+                                  vertical: 2,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: item.isLowConfidence
+                                      ? Colors.amber.shade100
+                                      : Colors.green.shade50,
+                                  borderRadius: BorderRadius.circular(6),
+                                  border: Border.all(
+                                    color: item.isLowConfidence
+                                        ? Colors.amber.shade400
+                                        : Colors.green.shade300,
+                                  ),
+                                ),
+                                child: Text(
+                                  '$confPercent%',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w700,
+                                    color: item.isLowConfidence
+                                        ? Colors.amber.shade900
+                                        : Colors.green.shade800,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                        trailing: const Icon(Icons.edit_outlined),
+                        onTap: () => _editTitle(item.date),
+                      );
+                    },
+                  ),
           ),
         ],
       ),

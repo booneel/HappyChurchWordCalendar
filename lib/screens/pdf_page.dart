@@ -9,25 +9,18 @@ class PdfPage extends StatefulWidget {
   final String title;
   final int page;
 
-  const PdfPage({
-    super.key,
-    required this.title,
-    required this.page,
-  });
+  const PdfPage({super.key, required this.title, required this.page});
 
   @override
-  State<PdfPage> createState() =>
-      _PdfPageState();
+  State<PdfPage> createState() => _PdfPageState();
 }
 
 class _PdfPageState extends State<PdfPage> {
   static const int totalPages = 368;
 
-  final PdfCacheService cache =
-      PdfCacheService();
+  final PdfCacheService cache = PdfCacheService();
 
-  final PdfViewerController controller =
-      PdfViewerController();
+  final PdfViewerController controller = PdfViewerController();
 
   late int page;
   late Future<File> pdfFuture;
@@ -36,34 +29,20 @@ class _PdfPageState extends State<PdfPage> {
   void initState() {
     super.initState();
 
-    page = widget.page.clamp(
-      1,
-      totalPages,
-    );
+    page = widget.page.clamp(1, totalPages);
 
-    pdfFuture =
-        cache.getCachedPdf();
+    pdfFuture = cache.getCachedPdf();
   }
 
-  Future<void> _goToPage(
-    int targetPage,
-  ) async {
-    final target =
-        targetPage.clamp(
-      1,
-      totalPages,
-    );
+  Future<void> _goToPage(int targetPage) async {
+    final target = targetPage.clamp(1, totalPages);
 
     setState(() {
       page = target;
     });
 
     if (controller.isReady) {
-      await controller.goToPage(
-        pageNumber: target,
-        anchor:
-            PdfPageAnchor.top,
-      );
+      await controller.goToPage(pageNumber: target, anchor: PdfPageAnchor.top);
     }
 
     // 중요:
@@ -75,11 +54,13 @@ class _PdfPageState extends State<PdfPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        toolbarHeight: 72,
         title: Text(
           widget.title,
-          maxLines: 1,
-          overflow:
-              TextOverflow.ellipsis,
+          maxLines: 2,
+          softWrap: true,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontSize: 16),
         ),
       ),
       body: Column(
@@ -87,59 +68,42 @@ class _PdfPageState extends State<PdfPage> {
           Expanded(
             child: FutureBuilder<File>(
               future: pdfFuture,
-              builder:
-                  (context, snapshot) {
-                if (snapshot
-                        .connectionState ==
-                    ConnectionState.waiting) {
-                  return const Center(
-                    child:
-                        CircularProgressIndicator(),
-                  );
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
                 }
 
-                if (snapshot.hasError ||
-                    snapshot.data == null) {
+                if (snapshot.hasError || snapshot.data == null) {
                   return Center(
                     child: Text(
                       'PDF를 불러오지 못했습니다.\n'
                       '${snapshot.error ?? ''}',
-                      textAlign:
-                          TextAlign.center,
+                      textAlign: TextAlign.center,
                     ),
                   );
                 }
 
                 return PdfViewer.file(
                   snapshot.data!.path,
-                  controller:
-                      controller,
-                  initialPageNumber:
-                      page,
-                  params:
-                      PdfViewerParams(
-                    pageAnchor:
-                        PdfPageAnchor.top,
+                  controller: controller,
+                  initialPageNumber: page,
+                  params: PdfViewerParams(
+                    pageAnchor: PdfPageAnchor.top,
 
                     // 손가락 스크롤로 다른 페이지에 가더라도
                     // 화면의 현재 페이지 표시만 바꿉니다.
                     // 조회수는 절대 올리지 않습니다.
-                    onPageChanged:
-                        (pageNumber) {
-                      if (!mounted ||
-                          pageNumber ==
-                              null) {
+                    onPageChanged: (pageNumber) {
+                      if (!mounted || pageNumber == null) {
                         return;
                       }
 
-                      if (page ==
-                          pageNumber) {
+                      if (page == pageNumber) {
                         return;
                       }
 
                       setState(() {
-                        page =
-                            pageNumber;
+                        page = pageNumber;
                       });
                     },
                   ),
@@ -147,64 +111,28 @@ class _PdfPageState extends State<PdfPage> {
               },
             ),
           ),
-
           SafeArea(
             top: false,
             child: Padding(
-              padding:
-                  const EdgeInsets
-                      .fromLTRB(
-                12,
-                8,
-                12,
-                12,
-              ),
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
               child: Row(
                 children: [
                   OutlinedButton.icon(
-                    onPressed: page > 1
-                        ? () =>
-                            _goToPage(
-                              page - 1,
-                            )
-                        : null,
-                    icon:
-                        const Icon(
-                      Icons.chevron_left,
-                    ),
-                    label:
-                        const Text(
-                      '이전',
-                    ),
+                    onPressed: page > 1 ? () => _goToPage(page - 1) : null,
+                    icon: const Icon(Icons.chevron_left),
+                    label: const Text('이전'),
                   ),
                   const Spacer(),
                   Text(
                     '$page / $totalPages',
-                    style:
-                        const TextStyle(
-                      fontWeight:
-                          FontWeight.w700,
-                    ),
+                    style: const TextStyle(fontWeight: FontWeight.w700),
                   ),
                   const Spacer(),
                   OutlinedButton.icon(
                     onPressed:
-                        page <
-                                totalPages
-                            ? () =>
-                                _goToPage(
-                                  page + 1,
-                                )
-                            : null,
-                    icon:
-                        const Icon(
-                      Icons
-                          .chevron_right,
-                    ),
-                    label:
-                        const Text(
-                      '다음',
-                    ),
+                        page < totalPages ? () => _goToPage(page + 1) : null,
+                    icon: const Icon(Icons.chevron_right),
+                    label: const Text('다음'),
                   ),
                 ],
               ),
