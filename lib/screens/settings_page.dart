@@ -67,7 +67,7 @@ class _SettingsPageState extends State<SettingsPage> {
     final controller = TextEditingController(text: currentDisplayName);
     final value = await showDialog<String>(
       context: context,
-      builder: (_) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: const Text('이름 변경'),
         content: TextField(
           controller: controller,
@@ -77,13 +77,17 @@ class _SettingsPageState extends State<SettingsPage> {
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(context), child: const Text('취소')),
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('취소'),
+          ),
           FilledButton(
-              onPressed: () => Navigator.pop(context, controller.text.trim()),
-              child: const Text('저장')),
+            onPressed: () =>
+                Navigator.pop(dialogContext, controller.text.trim()),
+            child: const Text('저장'),
+          ),
         ],
       ),
-    );
+    ).whenComplete(controller.dispose);
 
     if (value != null && value.isNotEmpty) {
       await profile.saveName(value);
@@ -163,7 +167,11 @@ class _SettingsPageState extends State<SettingsPage> {
             child: ListTile(
               leading: const Icon(Icons.person_outline),
               title: const Text('이름'),
-              subtitle: Text(currentDisplayName),
+              subtitle: Text(
+                currentDisplayName,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
               trailing: const Icon(Icons.chevron_right),
               onTap: _changeName,
             ),
@@ -215,14 +223,24 @@ class _SettingsPageState extends State<SettingsPage> {
           const SectionTitle('ℹ️ 앱 정보'),
           Card(
             child: Column(
-              children: const [
+              children: [
                 ListTile(
                   title: Text('앱 버전'),
                   trailing: Text('1.0.0'),
                 ),
                 ListTile(
                   title: Text('현재 PDF'),
-                  trailing: Text('365일 매일묵상말씀.pdf'),
+                  trailing: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxWidth: MediaQuery.sizeOf(context).width * 0.42,
+                    ),
+                    child: Text(
+                      '365일 매일묵상말씀.pdf',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.end,
+                    ),
+                  ),
                 ),
               ],
             ),

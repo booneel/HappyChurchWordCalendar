@@ -1,8 +1,9 @@
 """Small self-hosted DatePDF API for a NAS or a home server.
 
-The Flutter app talks to this service when DATEPDF_BACKEND=nas.  It keeps the
-same JSON field names as the Firebase implementation and stores all mutable
-data as files, so it can run without a database service.
+The Flutter app talks to this service when DATEPDF_BACKEND=nas. It keeps the
+same JSON field names as the Firebase implementation. Metadata remains in
+small JSON files, while counters and QnA use SQLite so concurrent requests do
+not overwrite one another.
 """
 
 from __future__ import annotations
@@ -11,8 +12,10 @@ import json
 import os
 import secrets
 import shutil
+import sqlite3
 import tempfile
 import threading
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -35,6 +38,7 @@ CATALOG = DATA / "catalog.json"
 SETTINGS = DATA / "settings.json"
 QNA = DATA / "qna.json"
 STATS = DATA / "stats.json"
+DATABASE = DATA / "datepdf.sqlite3"
 PDF_META = DATA / "pdf_metadata.json"
 WRITE_LOCK = threading.RLock()
 
@@ -61,6 +65,8 @@ class SettingsPayload(BaseModel):
 
 class ViewPayload(BaseModel):
     page: int = Field(ge=1)
+    count: int = Field(default=1, ge=1, le=10000)
+    eventId: str | None = None
     openedAt: str | None = None
 
 
@@ -87,6 +93,7 @@ def ensure_store() -> None:
         atomic_json(QNA, [])
     if not STATS.exists():
         atomic_json(STATS, {})
+    initialize_database()
 
 
 def read_json(path: Path, default: Any) -> Any:
@@ -94,6 +101,82 @@ def read_json(path: Path, default: Any) -> Any:
         return json.loads(path.read_text(encoding="utf-8"))
     except (FileNotFoundError, json.JSONDecodeError):
         return default
+
+
+@contextmanager
+def database():
+    connection = sqlite3.connect(DATABASE, timeout=30.0)
+    connection.row_factory = sqlite3.Row
+    connection.execute("PRAGMA busy_timeout = 30000")
+    try:
+        yield connection
+    finally:
+        connection.close()
+
+
+def initialize_database() -> None:
+    DATA.mkdir(parents=True, exist_ok=True)
+    with database() as connection:
+        connection.execute("PRAGMA journal_mode = WAL")
+        connection.execute("PRAGMA synchronous = NORMAL")
+        connection.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS page_stats (
+                page INTEGER PRIMARY KEY,
+                views INTEGER NOT NULL DEFAULT 0,
+                last_opened_at TEXT
+            );
+            CREATE TABLE IF NOT EXISTS view_events (
+                event_id TEXT PRIMARY KEY,
+                page INTEGER NOT NULL,
+                count INTEGER NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS qna (
+                id TEXT PRIMARY KEY,
+                payload TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            """
+        )
+
+        stats_count = connection.execute(
+            "SELECT COUNT(*) AS count FROM page_stats"
+        ).fetchone()["count"]
+        if stats_count == 0:
+            legacy_stats = read_json(STATS, {})
+            if isinstance(legacy_stats, dict):
+                connection.executemany(
+                    "INSERT OR IGNORE INTO page_stats(page, views) VALUES (?, ?)",
+                    [
+                        (int(page), int(views))
+                        for page, views in legacy_stats.items()
+                        if str(page).isdigit()
+                    ],
+                )
+
+        qna_count = connection.execute(
+            "SELECT COUNT(*) AS count FROM qna"
+        ).fetchone()["count"]
+        if qna_count == 0:
+            legacy_qna = read_json(QNA, [])
+            if isinstance(legacy_qna, list):
+                rows = []
+                for item in legacy_qna:
+                    if not isinstance(item, dict) or not item.get("id"):
+                        continue
+                    rows.append(
+                        (
+                            str(item["id"]),
+                            json.dumps(item, ensure_ascii=False),
+                            str(item.get("createdAt") or ""),
+                        )
+                    )
+                connection.executemany(
+                    "INSERT OR IGNORE INTO qna(id, payload, created_at) VALUES (?, ?, ?)",
+                    rows,
+                )
+        connection.commit()
 
 
 def atomic_json(path: Path, value: Any, backup: bool = False) -> None:
@@ -205,24 +288,50 @@ def put_catalog(payload: CatalogPayload) -> dict[str, Any]:
 
 @app.post("/api/stats/direct-open", dependencies=[Depends(require_auth)])
 def record_view(payload: ViewPayload) -> dict[str, Any]:
-    with WRITE_LOCK:
-        stats = read_json(STATS, {})
-        key = str(payload.page)
-        stats[key] = int(stats.get(key, 0)) + 1
-        atomic_json(STATS, stats)
-        return {"page": payload.page, "views": stats[key]}
+    opened_at = payload.openedAt or utc_now()
+    event_id = payload.eventId or secrets.token_urlsafe(18)
+    with database() as connection:
+        with connection:
+            inserted = connection.execute(
+                """
+                INSERT OR IGNORE INTO view_events(event_id, page, count, created_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (event_id, payload.page, payload.count, opened_at),
+            ).rowcount
+            if inserted:
+                connection.execute(
+                    """
+                    INSERT INTO page_stats(page, views, last_opened_at)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(page) DO UPDATE SET
+                        views = page_stats.views + excluded.views,
+                        last_opened_at = excluded.last_opened_at
+                    """,
+                    (payload.page, payload.count, opened_at),
+                )
+        row = connection.execute(
+            "SELECT views FROM page_stats WHERE page = ?",
+            (payload.page,),
+        ).fetchone()
+        return {"page": payload.page, "views": int(row["views"])}
 
 
 @app.get("/api/stats/top", dependencies=[Depends(require_auth)])
 def top_views(limit: int = 10) -> dict[str, Any]:
     limit = max(1, min(limit, 100))
-    stats = read_json(STATS, {})
-    items = [
-        {"page": int(page), "views": int(views)}
-        for page, views in stats.items()
-        if str(page).isdigit()
-    ]
-    items.sort(key=lambda item: (-item["views"], item["page"]))
+    with database() as connection:
+        rows = connection.execute(
+            """
+            SELECT page, views
+            FROM page_stats
+            WHERE views > 0
+            ORDER BY views DESC, page ASC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+    items = [{"page": int(row["page"]), "views": int(row["views"])} for row in rows]
     return {"items": items[:limit]}
 
 
@@ -241,11 +350,19 @@ def put_settings(payload: SettingsPayload) -> dict[str, Any]:
 
 @app.get("/api/qna", dependencies=[Depends(require_auth)])
 def get_qna() -> dict[str, Any]:
-    items = read_json(QNA, [])
-    if not isinstance(items, list):
-        items = []
-    items.sort(key=lambda item: item.get("createdAt", ""), reverse=True)
-    return {"items": items[:50]}
+    with database() as connection:
+        rows = connection.execute(
+            "SELECT payload FROM qna ORDER BY created_at DESC LIMIT 50"
+        ).fetchall()
+    items = []
+    for row in rows:
+        try:
+            item = json.loads(row["payload"])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(item, dict):
+            items.append(item)
+    return {"items": items}
 
 
 @app.post("/api/qna", dependencies=[Depends(require_auth)])
@@ -253,22 +370,48 @@ def create_qna(payload: QuestionPayload) -> dict[str, Any]:
     item = payload.model_dump()
     item["id"] = item["id"] or secrets.token_urlsafe(12)
     item["createdAt"] = item["createdAt"] or utc_now()
-    with WRITE_LOCK:
-        items = read_json(QNA, [])
-        items = [old for old in items if old.get("id") != item["id"]]
-        items.insert(0, item)
-        atomic_json(QNA, items, backup=True)
+    with database() as connection:
+        with connection:
+            connection.execute(
+                """
+                INSERT INTO qna(id, payload, created_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    payload = excluded.payload,
+                    created_at = excluded.created_at
+                """,
+                (
+                    item["id"],
+                    json.dumps(item, ensure_ascii=False),
+                    str(item["createdAt"]),
+                ),
+            )
     return item
 
 
 @app.put("/api/qna/{question_id}", dependencies=[Depends(require_auth)])
 def update_qna(question_id: str, updates: dict[str, Any]) -> dict[str, Any]:
-    with WRITE_LOCK:
-        items = read_json(QNA, [])
-        for item in items:
-            if item.get("id") == question_id:
+    with database() as connection:
+        with connection:
+            row = connection.execute(
+                "SELECT payload FROM qna WHERE id = ?",
+                (question_id,),
+            ).fetchone()
+            if row is not None:
+                item = json.loads(row["payload"])
                 item.update(updates)
-                atomic_json(QNA, items, backup=True)
+                connection.execute(
+                    """
+                    UPDATE qna
+                    SET payload = ?, created_at = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        json.dumps(item, ensure_ascii=False),
+                        str(item.get("createdAt") or ""),
+                        question_id,
+                    ),
+                )
                 return item
     raise HTTPException(status_code=404, detail="question not found")
 

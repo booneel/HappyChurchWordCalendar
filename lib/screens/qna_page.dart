@@ -27,39 +27,52 @@ class _QnaPageState extends State<QnaPage> {
 
     final result = await showDialog<bool>(
       context: context,
-      builder: (_) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
+        insetPadding: const EdgeInsets.symmetric(
+          horizontal: 18,
+          vertical: 24,
+        ),
         title: const Text('QnA 질문하기'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              TextField(
-                controller: titleController,
-                autofocus: true,
-                maxLength: 40,
-                decoration: const InputDecoration(
-                  labelText: '질문 제목',
-                  hintText: '궁금하신 내용을 한 줄로 요약해 주세요',
+        content: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.sizeOf(context).height * 0.56,
+          ),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                TextField(
+                  controller: titleController,
+                  autofocus: true,
+                  maxLength: 40,
+                  decoration: const InputDecoration(
+                    labelText: '질문 제목',
+                    hintText: '궁금하신 내용을 한 줄로 요약해 주세요',
+                  ),
                 ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: contentController,
-                maxLines: 4,
-                maxLength: 500,
-                decoration: const InputDecoration(
-                  labelText: '질문 내용',
-                  hintText: '자세한 내용을 입력해 주세요',
-                  alignLabelWithHint: true,
+                const SizedBox(height: 12),
+                TextField(
+                  controller: contentController,
+                  minLines: 4,
+                  maxLines: 8,
+                  maxLength: 500,
+                  keyboardType: TextInputType.multiline,
+                  textInputAction: TextInputAction.newline,
+                  decoration: const InputDecoration(
+                    labelText: '질문 내용',
+                    hintText: '자세한 내용을 입력해 주세요',
+                    alignLabelWithHint: true,
+                    contentPadding: EdgeInsets.all(14),
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context, false),
+            onPressed: () => Navigator.pop(dialogContext, false),
             child: const Text('취소'),
           ),
           FilledButton(
@@ -81,18 +94,19 @@ class _QnaPageState extends State<QnaPage> {
                 return;
               }
 
-              Navigator.pop(context, true);
+              Navigator.pop(dialogContext, true);
             },
             child: const Text('질문 등록'),
           ),
         ],
       ),
     );
+    final title = titleController.text.trim();
+    final content = contentController.text.trim();
+    titleController.dispose();
+    contentController.dispose();
 
     if (result == true) {
-      final title = titleController.text.trim();
-      final content = contentController.text.trim();
-
       await _qnaService.createQuestion(
         title: title,
         content: content,
@@ -113,71 +127,91 @@ class _QnaPageState extends State<QnaPage> {
 
     showDialog<void>(
       context: context,
-      builder: (_) => AlertDialog(
-        title: Text(item.title),
+      builder: (dialogContext) => AlertDialog(
+        insetPadding: const EdgeInsets.symmetric(
+          horizontal: 18,
+          vertical: 24,
+        ),
+        title: Text(
+          item.title,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+        ),
         content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Text(
-                    '작성자: ${item.authorName}',
-                    style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
-                  ),
-                  const Spacer(),
-                  Text(
-                    dateFormat.format(item.createdAt),
-                    style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
-                  ),
-                ],
-              ),
-              const Divider(height: 20),
-              const Text(
-                '📝 질문 내용',
-                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                item.content.isEmpty ? item.title : item.content,
-                style: const TextStyle(fontSize: 15),
-              ),
-              const SizedBox(height: 20),
-              const Text(
-                '💬 관리자 답변',
-                style: TextStyle(
-                  fontWeight: FontWeight.w700,
-                  fontSize: 13,
-                  color: Color(0xFF4F7CAC),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.sizeOf(context).height * 0.56,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 2,
+                  children: [
+                    Text(
+                      '작성자: ${item.authorName}',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey.shade600,
+                      ),
+                    ),
+                    Text(
+                      dateFormat.format(item.createdAt),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey.shade600,
+                      ),
+                    ),
+                  ],
                 ),
-              ),
-              const SizedBox(height: 6),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: item.isAnswered
-                      ? Colors.blue.shade50
-                      : Colors.grey.shade100,
-                  borderRadius: BorderRadius.circular(10),
+                const Divider(height: 20),
+                const Text(
+                  '📝 질문 내용',
+                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
                 ),
-                child: Text(
-                  item.isAnswered
-                      ? item.answer!
-                      : '아직 답변이 등록되지 않았습니다.\n잠시만 기다려 주세요.',
+                const SizedBox(height: 6),
+                Text(
+                  item.content.isEmpty ? item.title : item.content,
+                  style: const TextStyle(fontSize: 15),
+                ),
+                const SizedBox(height: 20),
+                const Text(
+                  '💬 관리자 답변',
                   style: TextStyle(
-                    fontSize: 14,
-                    color: item.isAnswered ? Colors.black87 : Colors.grey,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13,
+                    color: Color(0xFF4F7CAC),
                   ),
                 ),
-              ),
-            ],
+                const SizedBox(height: 6),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: item.isAnswered
+                        ? Colors.blue.shade50
+                        : Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    item.isAnswered
+                        ? item.answer!
+                        : '아직 답변이 등록되지 않았습니다.\n잠시만 기다려 주세요.',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: item.isAnswered ? Colors.black87 : Colors.grey,
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
         actions: [
           FilledButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogContext),
             child: const Text('닫기'),
           ),
         ],
@@ -246,22 +280,26 @@ class _QnaPageState extends State<QnaPage> {
                       ),
                     ),
                     const SizedBox(height: 14),
-                    Row(
-                      children: [
-                        ChoiceChip(
-                          label: const Text('전체'),
-                          selected: _filterMode == 'all',
-                          onSelected: (_) =>
-                              setState(() => _filterMode = 'all'),
-                        ),
-                        const SizedBox(width: 8),
-                        ChoiceChip(
-                          label: const Text('답변 완료'),
-                          selected: _filterMode == 'answered',
-                          onSelected: (_) =>
-                              setState(() => _filterMode = 'answered'),
-                        ),
-                      ],
+                    SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      child: Row(
+                        children: [
+                          ChoiceChip(
+                            label: const Text('전체'),
+                            selected: _filterMode == 'all',
+                            onSelected: (_) =>
+                                setState(() => _filterMode = 'all'),
+                          ),
+                          const SizedBox(width: 8),
+                          ChoiceChip(
+                            label: const Text('답변 완료'),
+                            selected: _filterMode == 'answered',
+                            onSelected: (_) =>
+                                setState(() => _filterMode = 'answered'),
+                          ),
+                        ],
+                      ),
                     ),
                     const SizedBox(height: 14),
                     if (filtered.isEmpty) ...[

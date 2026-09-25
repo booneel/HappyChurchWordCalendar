@@ -191,6 +191,8 @@ class _AdminStatsPageState extends State<AdminStatsPage> {
                                   ),
                                   title: Text(
                                     title,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
                                     style: const TextStyle(
                                       fontWeight: FontWeight.w800,
                                     ),
@@ -203,11 +205,17 @@ class _AdminStatsPageState extends State<AdminStatsPage> {
                                       backgroundColor: Colors.grey.shade200,
                                     ),
                                   ),
-                                  trailing: Text(
-                                    '${stat.views}회',
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.w800,
-                                      fontSize: 14,
+                                  trailing: SizedBox(
+                                    width: 58,
+                                    child: Text(
+                                      '${stat.views}회',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      textAlign: TextAlign.end,
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w800,
+                                        fontSize: 14,
+                                      ),
                                     ),
                                   ),
                                 );

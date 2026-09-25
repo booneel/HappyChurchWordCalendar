@@ -101,7 +101,7 @@ class PdfCatalogBuilderService {
     TextRecognizer? recognizer;
     if (Platform.isAndroid || Platform.isIOS) {
       try {
-        recognizer = TextRecognizer();
+        recognizer = TextRecognizer(script: TextRecognitionScript.korean);
       } catch (_) {
         recognizer = null;
       }
@@ -210,6 +210,7 @@ class PdfCatalogBuilderService {
       }
 
       consider(_extractTitleFromLayout(lines));
+      consider(_extractRankedLayoutCandidate(lines));
       consider(_extractTitleFromPlainText(structured.fullText));
 
       // 일부 PDF는 텍스트 순서만 제공하므로, 마지막으로 위치 기반 후보를 시도합니다.
@@ -274,8 +275,8 @@ class PdfCatalogBuilderService {
       confidence: dateIndex < 0
           ? 0.48
           : titleLines.length == 1
-          ? 0.58
-          : 0.63,
+              ? 0.58
+              : 0.63,
     );
   }
 
@@ -313,7 +314,8 @@ class PdfCatalogBuilderService {
         bottom: centerY - height / 2,
         height: height,
       );
-    }).toList()..sort((a, b) => b.centerY.compareTo(a.centerY));
+    }).toList()
+      ..sort((a, b) => b.centerY.compareTo(a.centerY));
   }
 
   ExtractedTitleInfo? _extractTitleFromLayout(List<_LayoutLine> lines) {
@@ -334,6 +336,84 @@ class PdfCatalogBuilderService {
         best = candidate;
       }
     }
+    return best;
+  }
+
+  ExtractedTitleInfo? _extractRankedLayoutCandidate(
+    List<_LayoutLine> lines,
+  ) {
+    if (lines.isEmpty) return null;
+
+    final ordered = [...lines]..sort((a, b) => b.centerY.compareTo(a.centerY));
+    final dateLines = ordered.where((line) => _isDateText(line.text)).toList();
+    final bodyHeights = ordered
+        .where((line) => _isLikelyBodyLine(line.text, line.height))
+        .map((line) => line.height)
+        .where((height) => height > 0)
+        .toList()
+      ..sort();
+    final typicalBodyHeight =
+        bodyHeights.isEmpty ? 0.02 : bodyHeights[bodyHeights.length ~/ 2];
+
+    ExtractedTitleInfo? best;
+    var bestScore = -double.infinity;
+
+    for (var start = 0; start < ordered.length; start++) {
+      for (var length = 1; length <= 2; length++) {
+        final end = start + length;
+        if (end > ordered.length) break;
+
+        final group = ordered.sublist(start, end);
+        if (group.length == 2) {
+          final gap = (group[0].centerY - group[1].centerY).abs();
+          if (gap > (group[0].height * 3.4).clamp(0.035, 0.14)) {
+            break;
+          }
+        }
+
+        final phrase = _smartJoin(group.map((line) => line.text).toList());
+        if (!_canBeTitleLine(phrase) ||
+            _isLikelyBodyLine(phrase, group.first.height)) {
+          continue;
+        }
+
+        final averageY =
+            group.map((line) => line.centerY).reduce((a, b) => a + b) /
+                group.length;
+        final averageHeight =
+            group.map((line) => line.height).reduce((a, b) => a + b) /
+                group.length;
+        final nearestDateGap = dateLines.isEmpty
+            ? 0.0
+            : dateLines
+                .map((line) => (line.centerY - averageY).abs())
+                .reduce((a, b) => a < b ? a : b);
+
+        if (dateLines.isNotEmpty &&
+            nearestDateGap < dateLines.first.height * 0.45) {
+          continue;
+        }
+
+        final heightRatio = averageHeight / typicalBodyHeight;
+        final heightScore = ((heightRatio - 0.85) * 0.18).clamp(-0.08, 0.18);
+        final dateScore = dateLines.isEmpty
+            ? 0.0
+            : (0.24 - nearestDateGap).clamp(0.0, 0.24) * 0.85;
+        final lengthScore =
+            phrase.length >= 3 && phrase.length <= 32 ? 0.10 : 0.0;
+        final lineScore = group.length == 1 ? 0.04 : 0.08;
+        final score = 0.45 + heightScore + dateScore + lengthScore + lineScore;
+
+        if (score > bestScore) {
+          bestScore = score;
+          best = ExtractedTitleInfo(
+            title: phrase,
+            confidence: score.clamp(0.45, 0.82),
+          );
+        }
+      }
+    }
+
     return best;
   }
 
@@ -400,16 +480,15 @@ class PdfCatalogBuilderService {
     }
     final heightRatio =
         titleLines.map((e) => e.height).reduce((a, b) => a + b) /
-        titleLines.length /
-        (nextBody.height == 0 ? 1 : nextBody.height);
+            titleLines.length /
+            (nextBody.height == 0 ? 1 : nextBody.height);
     final lengthScore = title.length <= 45 ? 0.08 : -0.08;
     final lineScore = titleLines.length <= 2 ? 0.08 : 0.0;
-    final confidence =
-        ((hasBodyLine ? 0.74 : 0.62) +
-                (heightRatio - 1.0).clamp(0.0, 0.18) +
-                lengthScore +
-                lineScore)
-            .clamp(0.45, 0.98);
+    final confidence = ((hasBodyLine ? 0.74 : 0.62) +
+            (heightRatio - 1.0).clamp(0.0, 0.18) +
+            lengthScore +
+            lineScore)
+        .clamp(0.45, 0.98);
 
     return ExtractedTitleInfo(title: title, confidence: confidence);
   }
@@ -424,8 +503,7 @@ class PdfCatalogBuilderService {
     if (nextText.isEmpty || _isHappyChurch(nextText)) return false;
 
     final heightRatio = next.height / (line.height == 0 ? 1 : line.height);
-    final closeInLineSpacing =
-        (next.centerY - line.centerY).abs() <=
+    final closeInLineSpacing = (next.centerY - line.centerY).abs() <=
         (line.height * 3.2).clamp(0.04, 0.18);
     final aligned =
         (next.pieces.first.left - line.pieces.first.left).abs() < 0.12;
@@ -703,9 +781,8 @@ class PdfCatalogBuilderService {
     var value = unique.join(' ');
 
     final tokens = value.split(RegExp(r'\s+'));
-    final singleCharacterTokens = tokens
-        .where((token) => token.runes.length == 1)
-        .length;
+    final singleCharacterTokens =
+        tokens.where((token) => token.runes.length == 1).length;
     if (tokens.length >= 4 && singleCharacterTokens / tokens.length >= 0.75) {
       value = tokens.join();
     }

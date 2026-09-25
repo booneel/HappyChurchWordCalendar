@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -17,6 +18,9 @@ class NasApiClient {
 
   factory NasApiClient() => instance;
 
+  static const _requestTimeout = Duration(seconds: 15);
+  static const _maxAttempts = 3;
+
   Uri _uri(String path, [Map<String, String>? query]) {
     final base = BackendConfig.nasBaseUri;
     final cleanPath = path.startsWith('/') ? path.substring(1) : path;
@@ -33,12 +37,53 @@ class NasApiClient {
           'Authorization': 'Bearer ${BackendConfig.nasToken.trim()}',
       };
 
+  Future<http.Response> _requestWithRetry(
+    Future<http.Response> Function() request,
+  ) async {
+    Object? lastError;
+
+    for (var attempt = 0; attempt < _maxAttempts; attempt++) {
+      try {
+        final response = await request();
+        if (!_isRetryableStatus(response.statusCode) ||
+            attempt == _maxAttempts - 1) {
+          return response;
+        }
+      } catch (error) {
+        lastError = error;
+        if (attempt == _maxAttempts - 1 || !_isRetryableError(error)) {
+          rethrow;
+        }
+      }
+
+      await Future<void>.delayed(Duration(milliseconds: 300 * (attempt + 1)));
+    }
+
+    throw lastError ?? const HttpException('NAS 요청이 실패했습니다.');
+  }
+
+  bool _isRetryableStatus(int statusCode) {
+    return statusCode == 408 || statusCode == 429 || statusCode >= 500;
+  }
+
+  bool _isRetryableError(Object error) {
+    return error is SocketException ||
+        error is TimeoutException ||
+        error is http.ClientException;
+  }
+
   Future<http.Response> get(String path, {Map<String, String>? query}) {
-    return http.get(_uri(path, query), headers: _headers);
+    return _requestWithRetry(
+      () => http
+          .get(_uri(path, query), headers: _headers)
+          .timeout(_requestTimeout),
+    );
   }
 
   Future<http.Response> head(String path) {
-    return http.head(_uri(path), headers: _headers);
+    return _requestWithRetry(
+      () => http.head(_uri(path), headers: _headers).timeout(_requestTimeout),
+    );
   }
 
   Future<Map<String, dynamic>> getJson(
@@ -58,13 +103,17 @@ class NasApiClient {
     String path,
     Map<String, dynamic> body,
   ) async {
-    final response = await http.put(
-      _uri(path),
-      headers: {
-        ..._headers,
-        'Content-Type': 'application/json',
-      },
-      body: jsonEncode(body),
+    final response = await _requestWithRetry(
+      () => http
+          .put(
+            _uri(path),
+            headers: {
+              ..._headers,
+              'Content-Type': 'application/json',
+            },
+            body: jsonEncode(body),
+          )
+          .timeout(_requestTimeout),
     );
     _check(response);
     if (response.body.trim().isEmpty) return <String, dynamic>{};
@@ -76,13 +125,17 @@ class NasApiClient {
     String path,
     Map<String, dynamic> body,
   ) async {
-    final response = await http.post(
-      _uri(path),
-      headers: {
-        ..._headers,
-        'Content-Type': 'application/json',
-      },
-      body: jsonEncode(body),
+    final response = await _requestWithRetry(
+      () => http
+          .post(
+            _uri(path),
+            headers: {
+              ..._headers,
+              'Content-Type': 'application/json',
+            },
+            body: jsonEncode(body),
+          )
+          .timeout(_requestTimeout),
     );
     _check(response);
     if (response.body.trim().isEmpty) return <String, dynamic>{};

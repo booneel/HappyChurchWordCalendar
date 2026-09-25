@@ -131,11 +131,13 @@ class _AdminPdfPageState extends State<AdminPdfPage> {
       context: context,
       builder: (_) => AlertDialog(
         title: const Text('PDF 교체 확인'),
-        content: Text(
-          '새로운 PDF로 교체하시겠습니까?\n\n'
-          '파일명: ${_pickedFile!.name}\n'
-          '크기: ${_formatBytes(fileSize)}\n\n'
-          '업로드 완료 후 모든 사용자가 새 PDF를 다운로드하게 됩니다.',
+        content: SingleChildScrollView(
+          child: Text(
+            '새로운 PDF로 교체하시겠습니까?\n\n'
+            '파일명: ${_pickedFile!.name}\n'
+            '크기: ${_formatBytes(fileSize)}\n\n'
+            '업로드 완료 후 모든 사용자가 새 PDF를 다운로드하게 됩니다.',
+          ),
         ),
         actions: [
           TextButton(
@@ -297,7 +299,9 @@ class _AdminPdfPageState extends State<AdminPdfPage> {
       context: context,
       builder: (_) => AlertDialog(
         title: const Text('오류'),
-        content: SelectableText(message),
+        content: SingleChildScrollView(
+          child: SelectableText(message),
+        ),
         actions: [
           FilledButton(
             onPressed: () => Navigator.pop(context),
@@ -363,6 +367,8 @@ class _AdminPdfPageState extends State<AdminPdfPage> {
                                 children: [
                                   Text(
                                     _currentFileName,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
                                     style: const TextStyle(
                                       fontWeight: FontWeight.w800,
                                       fontSize: 16,
@@ -385,18 +391,26 @@ class _AdminPdfPageState extends State<AdminPdfPage> {
                         ),
                         const Divider(height: 24),
                         Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Text(
-                              '최종 업데이트',
-                              style: TextStyle(color: Colors.grey.shade600),
+                            Expanded(
+                              child: Text(
+                                '최종 업데이트',
+                                style: TextStyle(color: Colors.grey.shade600),
+                              ),
                             ),
-                            Text(
-                              _currentUpdatedTime != null
-                                  ? dateFormat.format(_currentUpdatedTime!)
-                                  : '알 수 없음',
-                              style:
-                                  const TextStyle(fontWeight: FontWeight.w600),
+                            const SizedBox(width: 12),
+                            Flexible(
+                              child: Text(
+                                _currentUpdatedTime != null
+                                    ? dateFormat.format(_currentUpdatedTime!)
+                                    : '알 수 없음',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                textAlign: TextAlign.end,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
                             ),
                           ],
                         ),

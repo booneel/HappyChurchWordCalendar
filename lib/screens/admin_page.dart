@@ -38,7 +38,13 @@ class _AdminPageState extends State<AdminPage> {
               children: [
                 const Icon(Icons.notifications_active, color: Colors.red),
                 const SizedBox(width: 8),
-                Text('신규 QnA 질문 ($unreadCount건)'),
+                Expanded(
+                  child: Text(
+                    '신규 QnA 질문 ($unreadCount건)',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
               ],
             ),
             content: Text(
@@ -127,7 +133,6 @@ class _AdminPageState extends State<AdminPage> {
             ),
           ),
           const SizedBox(height: 18),
-
           _AdminCard(
             icon: Icons.picture_as_pdf_outlined,
             title: 'PDF 관리',
@@ -139,7 +144,6 @@ class _AdminPageState extends State<AdminPage> {
               );
             },
           ),
-
           _AdminCard(
             icon: Icons.calendar_month_outlined,
             title: '날짜 / 페이지 관리',
@@ -153,7 +157,6 @@ class _AdminPageState extends State<AdminPage> {
               );
             },
           ),
-
           _AdminCard(
             icon: Icons.list_alt_outlined,
             title: '말씀 제목 카탈로그 관리',
@@ -167,7 +170,6 @@ class _AdminPageState extends State<AdminPage> {
               );
             },
           ),
-
           StreamBuilder<int>(
             stream: _qnaService.streamUnreadCount(),
             builder: (context, snapshot) {
@@ -191,7 +193,6 @@ class _AdminPageState extends State<AdminPage> {
               );
             },
           ),
-
           _AdminCard(
             icon: Icons.bar_chart_outlined,
             title: '방문 & 이용 통계',
@@ -203,9 +204,7 @@ class _AdminPageState extends State<AdminPage> {
               );
             },
           ),
-
           const SizedBox(height: 14),
-
           Card(
             color: Theme.of(context).colorScheme.primaryContainer,
             child: const Padding(
@@ -297,6 +296,8 @@ class _AdminCard extends StatelessWidget {
         ),
         subtitle: Text(
           subtitle,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
           style: TextStyle(
             color: badgeCount > 0 ? Colors.red.shade800 : null,
             fontWeight: badgeCount > 0 ? FontWeight.w600 : null,

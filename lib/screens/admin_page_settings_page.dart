@@ -110,7 +110,9 @@ class _AdminPageSettingsPageState extends State<AdminPageSettingsPage> {
       context: context,
       builder: (_) => AlertDialog(
         title: const Text('오류'),
-        content: SelectableText(message),
+        content: SingleChildScrollView(
+          child: SelectableText(message),
+        ),
         actions: [
           FilledButton(
             onPressed: () => Navigator.pop(context),
@@ -172,44 +174,57 @@ class _AdminPageSettingsPageState extends State<AdminPageSettingsPage> {
                             ),
                           ),
                           const SizedBox(height: 16),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: TextField(
-                                  controller: _startPageController,
-                                  keyboardType: TextInputType.number,
-                                  decoration: const InputDecoration(
-                                    labelText: '1월 1일 PDF 페이지',
-                                    hintText: '예: 4',
-                                    suffixText: '페이지',
-                                  ),
-                                  onChanged: (val) {
-                                    final parsed = int.tryParse(val);
-                                    if (parsed != null && parsed >= 1) {
-                                      setState(() => _startPage = parsed);
-                                    }
-                                  },
+                          LayoutBuilder(
+                            builder: (context, constraints) {
+                              final startPageField = TextField(
+                                controller: _startPageController,
+                                keyboardType: TextInputType.number,
+                                decoration: const InputDecoration(
+                                  labelText: '1월 1일 PDF 페이지',
+                                  hintText: '예: 4',
+                                  suffixText: '페이지',
                                 ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: TextField(
-                                  controller: _pageCountController,
-                                  keyboardType: TextInputType.number,
-                                  decoration: const InputDecoration(
-                                    labelText: '총 일수 (기본 365)',
-                                    hintText: '365',
-                                    suffixText: '일',
-                                  ),
-                                  onChanged: (val) {
-                                    final parsed = int.tryParse(val);
-                                    if (parsed != null && parsed >= 1) {
-                                      setState(() => _pageCount = parsed);
-                                    }
-                                  },
+                                onChanged: (val) {
+                                  final parsed = int.tryParse(val);
+                                  if (parsed != null && parsed >= 1) {
+                                    setState(() => _startPage = parsed);
+                                  }
+                                },
+                              );
+                              final pageCountField = TextField(
+                                controller: _pageCountController,
+                                keyboardType: TextInputType.number,
+                                decoration: const InputDecoration(
+                                  labelText: '총 일수 (기본 365)',
+                                  hintText: '365',
+                                  suffixText: '일',
                                 ),
-                              ),
-                            ],
+                                onChanged: (val) {
+                                  final parsed = int.tryParse(val);
+                                  if (parsed != null && parsed >= 1) {
+                                    setState(() => _pageCount = parsed);
+                                  }
+                                },
+                              );
+
+                              if (constraints.maxWidth < 360) {
+                                return Column(
+                                  children: [
+                                    startPageField,
+                                    const SizedBox(height: 12),
+                                    pageCountField,
+                                  ],
+                                );
+                              }
+
+                              return Row(
+                                children: [
+                                  Expanded(child: startPageField),
+                                  const SizedBox(width: 12),
+                                  Expanded(child: pageCountField),
+                                ],
+                              );
+                            },
                           ),
                           const SizedBox(height: 16),
                           SizedBox(
@@ -287,6 +302,8 @@ class _AdminPageSettingsPageState extends State<AdminPageSettingsPage> {
                           width: 80,
                           child: Text(
                             DateFormat('M월 d일 (E)', 'ko_KR').format(date),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
                             style: TextStyle(
                               fontWeight:
                                   isToday ? FontWeight.w800 : FontWeight.w600,
@@ -298,6 +315,8 @@ class _AdminPageSettingsPageState extends State<AdminPageSettingsPage> {
                         ),
                         title: Text(
                           'PDF $pdfPage 페이지',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                             fontWeight:
                                 isToday ? FontWeight.w800 : FontWeight.w600,
@@ -322,11 +341,17 @@ class _AdminPageSettingsPageState extends State<AdminPageSettingsPage> {
                                   ),
                                 ),
                               )
-                            : Text(
-                                '${index + 1}번째 날',
-                                style: TextStyle(
-                                  color: Colors.grey.shade500,
-                                  fontSize: 12,
+                            : SizedBox(
+                                width: 58,
+                                child: Text(
+                                  '${index + 1}번째 날',
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  textAlign: TextAlign.end,
+                                  style: TextStyle(
+                                    color: Colors.grey.shade500,
+                                    fontSize: 12,
+                                  ),
                                 ),
                               ),
                       );

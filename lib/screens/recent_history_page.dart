@@ -96,9 +96,13 @@ class _RecentHistoryPageState extends State<RecentHistoryPage> {
                         style: const TextStyle(
                           fontWeight: FontWeight.w700,
                         ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
                       ),
                       subtitle: Text(
                         'PDF ${item.page}페이지 · ${timeFormat.format(item.openedAt)}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           fontSize: 12,
                           color: Colors.grey.shade600,

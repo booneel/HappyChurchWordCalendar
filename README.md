@@ -81,7 +81,7 @@ The Word DatePDF는 날짜를 기준으로 365일 묵상 PDF의 해당 페이지
 
 현재 프로젝트 기준 기능입니다.
 
-- Flutter Android 앱
+- Flutter Android/iOS 앱
 - Firebase 초기화
 - Firebase Storage PDF 연결
 - Firebase Firestore 연결
@@ -96,7 +96,8 @@ The Word DatePDF는 날짜를 기준으로 365일 묵상 PDF의 해당 페이지
 - 직접 클릭 조회수 기록
 - 많이 본 말씀 TOP 3
 - 최근 직접 열어본 말씀 기록
-- QnA UI
+- QnA UI 및 관리자 답변 관리
+- 제목 카탈로그 JSON 가져오기
 - PDF 내부 스크롤은 조회수에서 제외
 
 ---
@@ -127,6 +128,8 @@ The Word DatePDF는 날짜를 기준으로 365일 묵상 PDF의 해당 페이지
 ```
 
 제목 confidence가 낮은 항목은 검수 목록에서 날짜별로 확인·수정할 수 있습니다.
+
+관리자 제목 카탈로그에서는 JSON 파일을 불러와 날짜별 제목을 한 번에 등록할 수도 있습니다. 불러오기 전에 파일 형식과 등록할 제목 개수를 확인하며, 확인 대화상자에서 불러오기를 누르면 카탈로그에 즉시 저장됩니다.
 
 ---
 
@@ -193,12 +196,11 @@ Date-Pdf/
 ```text
 lib/screens/admin_title_catalog_page.dart
 
-lib/services/pdf_title_service.dart
 lib/services/pdf_catalog_service.dart
 lib/services/pdf_catalog_builder_service.dart
 ```
 
-이 파일들은 관리자 분석 작업과 카탈로그 표시에서 사용되므로 삭제하지 않습니다.
+`admin_title_catalog_page.dart`는 JSON 가져오기·자동 분석 실행·confidence 검수·수동 수정을 담당하고, `pdf_catalog_service.dart`는 JSON 파싱과 Firebase/NAS/로컬 저장을 담당합니다. `pdf_catalog_builder_service.dart`는 PDF 레이아웃 분석과 한글 OCR 보완을 담당합니다.
 
 PowerShell:
 
@@ -206,7 +208,7 @@ PowerShell:
 cd D:\my_portfolio\Date-Pdf
 
 Get-ChildItem .\lib -Recurse -Filter *.dart |
-Select-String "pdf_title_service|pdf_catalog_service|pdf_catalog_builder_service|admin_title_catalog_page"
+Select-String "pdf_catalog_service|pdf_catalog_builder_service|admin_title_catalog_page"
 ```
 
 아무 결과가 없으면 삭제 가능합니다.
@@ -215,18 +217,65 @@ Select-String "pdf_title_service|pdf_catalog_service|pdf_catalog_builder_service
 
 # 9. ML Kit 제목 보완 분석
 
-ML Kit는 일반 사용자 화면이 아니라 관리자 제목 분석 작업에서만 사용합니다.
+ML Kit는 일반 사용자 화면이 아니라 관리자 제목 분석 작업에서만 사용합니다. 자동 분석은 PDF 텍스트 구조를 먼저 확인하고, 결과의 확신도가 낮을 때 한글 OCR을 보완 실행합니다.
 Android/iOS 관리자 빌드에는 다음 패키지가 필요합니다.
 
 ```powershell
 google_mlkit_text_recognition: ^0.17.1
 ```
 
-`android/app/build.gradle.kts`에 아래 줄이 남아 있다면 삭제합니다.
+한글 OCR release 빌드가 누락되지 않도록 `android/app/build.gradle.kts`에 아래 의존성을 유지합니다.
 
 ```kotlin
 implementation("com.google.mlkit:text-recognition-korean:16.0.1")
 ```
+
+분석 서비스에서는 한글 인식 스크립트를 명시적으로 사용합니다.
+
+```dart
+TextRecognizer(script: TextRecognitionScript.korean)
+```
+
+제목 후보는 날짜 위치, 제목과 본문의 글자 크기, 문장 길이, 줄 간격, 성경 구절·본문 문장 여부를 함께 점수화합니다. 확신도가 낮은 결과는 관리자 검수 목록에 표시됩니다.
+
+## 9.1 제목 JSON 가져오기 형식
+
+관리자 센터 → `제목 카탈로그 & 검수` → `JSON 제목 파일 불러오기`에서 파일을 선택합니다. 다음 형식을 지원합니다.
+
+```json
+{
+  "year": 2026,
+  "titles": {
+    "01-01": "새해의 소망",
+    "01-02": "믿음의 길"
+  }
+}
+```
+
+배열 형식도 사용할 수 있습니다.
+
+```json
+[
+  {"date": "2026-01-01", "title": "새해의 소망"},
+  {"month": 1, "day": 2, "title": "믿음의 길"}
+]
+```
+
+날짜는 `MM-DD`, `YYYY-MM-DD`, `1월 2일`, `M/D` 형식을 인식합니다. 제목 필드는 `title`, `name`, `text`, `content`, `devotionalTitle`, `제목`, `말씀`을 사용할 수 있습니다. `confidence`를 함께 넣으면 검수 필요 여부에 반영하며, confidence가 없으면 가져온 제목을 확신도 100%로 저장합니다.
+
+```json
+{
+  "year": 2026,
+  "titles": {
+    "01-01": "새해의 소망"
+  },
+  "confidences": {
+    "01-01": 0.72
+  }
+}
+```
+
+JSON을 불러오면 기존 화면의 편집 목록을 새 내용으로 교체합니다. 확인 대화상자에서 `불러오기`를 누르면 Firebase/NAS와 로컬 카탈로그에 즉시 저장됩니다.
 
 ---
 
@@ -972,6 +1021,22 @@ Android만 사용할 경우 Android 디바이스에서 실행하면 됩니다.
 
 ---
 
+# 35.1. iOS 실행
+
+iOS 빌드와 실기기 실행은 macOS와 Xcode가 설치된 환경에서 진행합니다. 프로젝트 루트에서 다음을 실행한 뒤 Xcode에서 서명 팀을 선택합니다.
+
+```bash
+flutter pub get
+flutter build ios --no-codesign --config-only
+open ios/Runner.xcworkspace
+```
+
+Xcode에서 `Runner` target의 `Signing & Capabilities` → `Automatically manage signing`을 켜고 Apple ID의 Team을 선택합니다. 이후 iPhone 또는 iOS Simulator를 선택해 실행합니다. `main.dart` 파일을 직접 Xcode로 여는 것이 아니라 `ios/Runner.xcworkspace`를 엽니다.
+
+현재 iOS Bundle ID는 `com.example.datePdf`이며 `lib/firebase_options.dart`의 iOS 설정과 맞춰져 있습니다. Bundle ID를 바꾸면 Firebase Console에 같은 iOS 앱을 등록하고 `flutterfire configure`를 다시 실행해야 합니다.
+
+---
+
 # 36. Firestore 데이터베이스 생성
 
 실제로 발생했던 오류:
@@ -1252,17 +1317,20 @@ await initializeDateFormatting('ko_KR', null);
 
 # 49. 제목 분석의 현재 구조
 
-제목 분석은 일반 사용자 화면에서 매번 실행하지 않고, 관리자가 PDF를 등록하거나 제목 카탈로그를 갱신할 때만 실행합니다. 레이아웃 기반 후보 추출과 Google ML Kit OCR을 함께 사용하고, 관리자가 결과를 검수·수정할 수 있습니다.
+제목 분석은 일반 사용자 화면에서 매번 실행하지 않고, 관리자가 PDF를 등록하거나 제목 카탈로그를 갱신할 때만 실행합니다. 레이아웃 기반 후보 추출과 한글 Google ML Kit OCR을 함께 사용하고, 후보 점수와 confidence를 계산하여 관리자가 결과를 검수·수정할 수 있습니다.
 
 ```text
 관리자 PDF 등록/카탈로그 갱신
 → 날짜·본문·구절 사이의 제목 영역 후보 추출
-→ OCR 후보를 읽기 순서와 문맥에 맞게 병합
+→ 글자 크기·줄 간격·날짜와의 거리로 후보 점수 계산
+→ 한글 OCR 후보를 읽기 순서와 문맥에 맞게 병합
 → 제목/신뢰도 저장
 → 일반 사용자 화면은 저장된 카탈로그만 조회
 ```
 
-Firebase 모드에서는 Firestore에 저장하고, NAS 모드에서는 `/api/catalog/current` API에 저장합니다. 제목을 확신할 수 없는 항목은 낮은 confidence로 표시하여 관리자 검수를 유도합니다.
+Firebase 모드에서는 Firestore에 저장하고, NAS 모드에서는 `/api/catalog/current` API에 저장합니다. 현재 분석 버전은 `5`이며, 기존 카탈로그의 버전이 낮으면 관리자 화면에 재분석 안내가 표시됩니다. 제목을 확신할 수 없는 항목은 낮은 confidence로 표시하여 관리자 검수를 유도합니다.
+
+PDF 자동 분석 외에도 관리자 화면에서 날짜별 제목 JSON을 가져올 수 있습니다. JSON 가져오기는 `01-01` 날짜 키 또는 `date`·`title` 배열 항목을 지원하며, 가져온 결과를 확인한 후 저장합니다.
 
 ---
 
@@ -1869,7 +1937,7 @@ GitHub:
 ```text
 DatePDF v7.1
 
-Flutter Android
+Flutter Android/iOS
 ↓
 Firebase Storage PDF
 ↓
@@ -1877,7 +1945,7 @@ Firebase Storage PDF
 ↓
 날짜별 페이지 자동 이동
 
-Firestore
+Firestore 또는 NAS SQLite/API
 ↓
 직접 클릭 조회수
 
@@ -1902,6 +1970,17 @@ QnA
 ---
 
 # 72. 변경 이력
+
+## 2026-09-25 제목 카탈로그·동시 사용·화면 대응 보완
+
+- 제목 카탈로그 JSON 가져오기 및 날짜별 JSON 형식 안내 추가
+- `MM-DD`, `YYYY-MM-DD`, `M월 D일`, 배열형 `date`·`title` 데이터 지원
+- 한글 ML Kit OCR과 제목 후보 점수화 로직 보완
+- 제목 분석 알고리즘 버전 5 적용 및 낮은 confidence 검수 흐름 정리
+- QnA·제목 카탈로그 필터 가로 스크롤과 다이얼로그 내부 스크롤 적용
+- 긴 제목·파일명·답변·관리자 안내 문구의 기기별 레이아웃 대응
+- NAS 조회수 이벤트 중복 방지, 재시도 대기열, SQLite WAL 저장 반영
+- iOS Xcode 실행 절차 추가
 
 ## 2026-09-23 ~ 2026-09-24 개발 정리
 
@@ -2005,17 +2084,18 @@ python/Dockerfile.nas
 │   ├── catalog.json
 │   ├── settings.json
 │   ├── qna.json
-│   └── stats.json
+│   ├── stats.json
+│   └── datepdf.sqlite3
 └── backups/
     ├── 2026-09-24-current.pdf
     └── 2026-09-24-catalog.json
 ```
 
-PDF 교체는 임시 파일에 업로드한 뒤 검증하고 `current.pdf`를 원자적으로 교체합니다. 기존 PDF와 catalog.json은 날짜별로 백업합니다.
+PDF 교체는 임시 파일에 업로드한 뒤 검증하고 `current.pdf`를 원자적으로 교체합니다. 기존 PDF와 catalog.json은 날짜별로 백업합니다. 조회수와 QnA는 `datepdf.sqlite3`에 저장하며, SQLite WAL과 busy timeout을 사용해 여러 기기의 동시 요청을 처리합니다.
 
 ## 74.2.1 제공되는 NAS 서버 실행 방법
 
-저장소에 포함된 `python/nas_api.py`는 별도 데이터베이스 없이 위 계약을 처리하는 FastAPI 서버입니다. Synology/QNAP의 Docker 또는 Python 3.10 이상 환경에서 실행할 수 있습니다.
+저장소에 포함된 `python/nas_api.py`는 JSON 파일과 SQLite를 함께 사용하는 FastAPI 서버입니다. 기존 `qna.json`·`stats.json`이 있으면 첫 실행 시 SQLite로 마이그레이션하며, Synology/QNAP의 Docker 또는 Python 3.10 이상 환경에서 실행할 수 있습니다.
 
 ```powershell
 cd python
@@ -2103,7 +2183,7 @@ PUT /api/catalog/current
   "year": 2026,
   "startPage": 4,
   "pageCount": 365,
-  "titleAlgorithmVersion": 3,
+  "titleAlgorithmVersion": 5,
   "titles": {
     "01-02": "고난을 통과하면서",
     "01-20": "근심과 불안으로부터 소망이 필요할 때",
@@ -2118,8 +2198,20 @@ PUT /api/catalog/current
 }
 ```
 
-제목 분석은 관리자 작업에서만 수행합니다. 일반 사용자는 이 JSON만 읽습니다.
-`titleAlgorithmVersion`이 앱의 현재 버전보다 낮으면 관리자 화면에 재분석 경고가 표시됩니다. 기존 카탈로그를 자동으로 덮어쓰지 않으므로, 분석 후 관리자가 결과를 확인하고 저장해야 합니다.
+제목 분석은 관리자 작업에서만 수행합니다. 일반 사용자는 저장된 카탈로그만 읽습니다.
+`titleAlgorithmVersion`이 앱의 현재 버전보다 낮으면 관리자 화면에 재분석 경고가 표시됩니다. 자동 분석 결과는 관리자가 확인하고 저장해야 하며, JSON 가져오기도 확인 후 저장할 때만 기존 카탈로그를 교체합니다.
+
+관리자 화면에서 불러올 수 있는 최소 JSON 형식은 다음과 같습니다.
+
+```json
+{
+  "year": 2026,
+  "titles": {
+    "01-01": "새해의 소망",
+    "01-02": "믿음의 길"
+  }
+}
+```
 
 ### 조회수
 
@@ -2133,6 +2225,8 @@ GET /api/stats/top?limit=10
 ```json
 {
   "page": 269,
+  "count": 1,
+  "eventId": "unique-client-event-id",
   "openedAt": "2026-09-24T10:00:00Z"
 }
 ```
@@ -2148,7 +2242,7 @@ Top 응답:
 }
 ```
 
-서버는 `page`를 기본 키로 두고 증가 연산을 원자적으로 처리해야 합니다. 앱은 네트워크가 끊겨도 로컬 조회수를 먼저 표시하고, NAS 연결이 복구되면 서버 요청을 재시도할 수 있도록 구현되어 있습니다.
+서버는 `page`를 기본 키로 두고 증가 연산을 원자적으로 처리해야 합니다. `eventId`가 같은 요청은 한 번만 반영해야 네트워크 재시도 때 조회수가 중복 증가하지 않습니다. 앱은 네트워크가 끊겨도 로컬 조회수를 먼저 표시하고, NAS 연결이 복구되면 대기 중인 요청을 재시도합니다.
 
 ### 날짜/페이지 설정
 
@@ -2196,13 +2290,12 @@ NAS 모드의 QnA 스트림은 30초 polling 방식입니다. 실시간 WebSocke
 
 ```text
 [x] `python/nas_api.py` 기본 API 구현
-[x] JSON 원자적 저장과 조회수 증가 잠금 구현
+[x] SQLite WAL 기반 조회수·QnA 저장
+[x] `eventId` 기반 조회수 중복 반영 방지
+[x] 네트워크 실패 시 앱의 조회수·QnA 재전송 대기열
 [x] current.pdf 임시 업로드 후 원자적 교체 구현
 [ ] HTTPS reverse proxy 구성
 [ ] Bearer 토큰 또는 VPN 인증 적용
-[ ] current.pdf 원자적 교체
-[ ] catalog.json 동시 수정 잠금
-[ ] 조회수 증가의 원자성 보장
 [ ] 일별 PDF/catalog 백업
 [ ] CORS 또는 모바일 요청 허용 설정
 [ ] 4xx/5xx 응답에 JSON 오류 메시지 제공
@@ -2248,6 +2341,7 @@ Android Studio에서 `Run` 또는 `Hot Reload`로 보이는 변경은 현재 연
 - 커밋하지 않은 변경은 GitHub에 포함되지 않습니다.
 - 기기에 남아 있는 SharedPreferences, PDF 캐시, 제목 카탈로그는 새 APK를 설치해도 보통 유지됩니다.
 - 제목 분석 알고리즘을 바꾼 뒤에는 관리자 화면에서 `PDF 전체 365일 제목 분석 다시 실행` 후 저장해야 기존 제목 데이터가 교체됩니다.
+- JSON 제목 파일을 가져온 뒤에도 확인 대화상자에서 내용을 확인하고 불러오기를 눌러야 서버와 다른 기기에 반영됩니다.
 
 릴리스 APK를 새 상태로 확인하려면 프로젝트 루트에서 실행합니다.
 
@@ -2281,7 +2375,7 @@ qna_notifications_enabled
 
 홈 화면의 오늘 말씀 카드에는 현재 날짜에 매핑된 PDF 페이지를 작은 PDF 뷰어로 표시합니다. 프리뷰를 누르면 같은 날짜의 전체 PDF 화면으로 이동하고, 프리뷰를 단순히 노출하는 것만으로는 조회수를 증가시키지 않습니다.
 
-화면 폭이 좁은 기기에서 발생하는 `RenderFlex overflow`를 줄이기 위해 관리자 안내 문구와 QnA 상태 영역은 `Expanded`/`Wrap`으로 배치하고, 긴 제목은 줄바꿈과 말줄임을 사용합니다. PDF 프리뷰는 고정 높이 영역 안에서 렌더링하여 홈 목록의 세로 레이아웃이 깨지지 않도록 구성했습니다.
+화면 폭이 좁은 기기에서 발생하는 `RenderFlex overflow`를 줄이기 위해 관리자 안내 문구와 QnA 상태 영역은 `Expanded`/`Wrap`으로 배치합니다. 일반 목록의 긴 제목은 화면에 맞춰 줄바꿈 또는 말줄임을 사용하고, 제목 카탈로그 검수 목록에서는 제목 전체를 확인할 수 있도록 내용에 맞춰 줄바꿈합니다. PDF 프리뷰는 고정 높이 영역 안에서 렌더링하여 홈 목록의 세로 레이아웃이 깨지지 않도록 구성했습니다.
 
 ## 78. 실기기 설치 직후 종료되는 경우
 

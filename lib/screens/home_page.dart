@@ -442,6 +442,8 @@ class _TopWordCard extends StatelessWidget {
               const SizedBox(height: 6),
               Text(
                 '$views회 열람',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   fontSize: 11,
                   color: Colors.grey.shade600,

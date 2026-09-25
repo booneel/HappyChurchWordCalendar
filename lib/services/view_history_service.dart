@@ -70,11 +70,14 @@ class ViewHistoryService {
 
   static const String _recentKey = 'recent_direct_devotional_opens_v1';
   static const String _pageViewsKey = 'local_page_view_counts_v1';
+  static const String _pendingNasViewsKey = 'pending_nas_page_views_v1';
 
   FirebaseFirestore get _db => FirebaseFirestore.instance;
   final NasApiClient _nas = NasApiClient.instance;
   final StreamController<List<PageViewStat>> _topPagesController =
       StreamController<List<PageViewStat>>.broadcast();
+  Future<void> _nasWriteQueue = Future<void>.value();
+  final Random _random = Random();
 
   Map<int, int> _cachedLocalViews = {};
   final Map<int, int> _cachedRemoteViews = {};
@@ -86,7 +89,11 @@ class ViewHistoryService {
     // Widget tests can mount DatePdfApp without running main(), so Firebase
     // may not have an app yet. In that case local history remains available
     // and the remote listener is attached after normal app initialization.
-    if (BackendConfig.useNas || Firebase.apps.isEmpty) return;
+    if (BackendConfig.useNas) {
+      unawaited(_flushPendingNasViews());
+      return;
+    }
+    if (Firebase.apps.isEmpty) return;
 
     _db.collection('page_stats').snapshots().listen(
       (snapshot) {
@@ -149,31 +156,133 @@ class ViewHistoryService {
     _localWriteQueue = localUpdate.catchError((_) {});
     await localUpdate;
 
-    // 사용자의 화면 진입은 로컬 기록을 기다리지 않습니다. Firestore SDK가
-    // 온라인 복귀 시 대기 중인 쓰기를 재전송하므로 오프라인에서도 누락되지 않습니다.
-    unawaited(_writeRemoteView(page));
+    // NAS는 실패한 조회수를 로컬 대기열에 남겨 재전송합니다.
+    // Firebase는 SDK의 오프라인 쓰기 큐를 사용합니다.
+    if (BackendConfig.useNas) {
+      unawaited(_queueNasView(page));
+    } else {
+      unawaited(_writeRemoteView(page));
+    }
   }
 
-  Future<void> _writeRemoteView(int page) async {
+  Future<bool> _writeRemoteView(
+    int page, {
+    int count = 1,
+    String? eventId,
+  }) async {
     try {
       if (BackendConfig.useNas) {
         await _nas.postJson('/api/stats/direct-open', {
           'page': page,
+          'count': count,
+          if (eventId != null) 'eventId': eventId,
           'openedAt': DateTime.now().toUtc().toIso8601String(),
         });
-        return;
+        return true;
       }
       await _db.collection('page_stats').doc(page.toString()).set(
         {
           'page': page,
-          'views': FieldValue.increment(1),
+          'views': FieldValue.increment(count),
           'lastDirectOpenedAt': FieldValue.serverTimestamp(),
           'countType': 'direct_open_only',
         },
         SetOptions(merge: true),
       );
+      return true;
     } catch (_) {
-      // 오프라인이면 Firestore SDK의 로컬 큐/다음 실행 시 재시도에 맡깁니다.
+      return false;
+    }
+  }
+
+  Future<void> _queueNasView(int page) {
+    final operation = _nasWriteQueue.then((_) async {
+      await _addPendingNasView(page);
+      await _flushPendingNasViewsOnce();
+    });
+    _nasWriteQueue = operation.catchError((_) {});
+    return operation;
+  }
+
+  Future<void> _flushPendingNasViews() {
+    final operation = _nasWriteQueue.then((_) => _flushPendingNasViewsOnce());
+    _nasWriteQueue = operation.catchError((_) {});
+    return operation;
+  }
+
+  Future<Map<String, List<String>>> _loadPendingNasViews() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_pendingNasViewsKey);
+    if (raw == null || raw.isEmpty) return {};
+
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is Map) {
+        final result = <String, List<String>>{};
+        for (final entry in decoded.entries) {
+          if (int.tryParse(entry.key.toString()) == null) continue;
+          if (entry.value is List) {
+            final eventIds = entry.value
+                .map((value) => value.toString())
+                .where((value) => value.isNotEmpty)
+                .toList();
+            if (eventIds.isNotEmpty) {
+              result[entry.key.toString()] = eventIds;
+            }
+            continue;
+          }
+
+          // 이전 버전의 숫자 대기열도 유실 없이 읽습니다.
+          final count = (entry.value as num?)?.toInt();
+          if (count != null && count > 0) {
+            result[entry.key.toString()] = List.generate(
+              count,
+              (index) => 'legacy-${entry.key}-$index',
+            );
+          }
+        }
+        return result;
+      }
+    } catch (_) {}
+
+    return {};
+  }
+
+  Future<void> _savePendingNasViews(
+    Map<String, List<String>> pending,
+  ) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_pendingNasViewsKey, jsonEncode(pending));
+  }
+
+  Future<void> _addPendingNasView(int page) async {
+    final pending = await _loadPendingNasViews();
+    final key = page.toString();
+    pending[key] = [
+      ...?pending[key],
+      _newNasEventId(),
+    ];
+    await _savePendingNasViews(pending);
+  }
+
+  String _newNasEventId() {
+    return '${DateTime.now().microsecondsSinceEpoch}-${_random.nextInt(0x7fffffff).toRadixString(16)}';
+  }
+
+  Future<void> _flushPendingNasViewsOnce() async {
+    if (!BackendConfig.useNas) return;
+
+    final pending = await _loadPendingNasViews();
+    for (final entry in pending.entries.toList()) {
+      final success = await _writeRemoteView(
+        int.parse(entry.key),
+        count: entry.value.length,
+        eventId: entry.value.first,
+      );
+      if (!success) return;
+
+      pending.remove(entry.key);
+      await _savePendingNasViews(pending);
     }
   }
 
