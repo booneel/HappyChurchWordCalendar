@@ -55,6 +55,7 @@ android/key.properties
 
 .env
 .env.*
+!functions/.env.example
 firebase-service-account.json
 *service-account*.json
 

@@ -1,9 +1,81 @@
 const functions = require('firebase-functions/v1');
 const admin = require('firebase-admin');
+const nodemailer = require('nodemailer');
 
 admin.initializeApp();
 
 const db = admin.firestore();
+
+const adminNotificationEmail = (process.env.ADMIN_NOTIFICATION_EMAIL || '').trim();
+const smtpHost = (process.env.SMTP_HOST || '').trim();
+const smtpPort = Number.parseInt(process.env.SMTP_PORT || '465', 10);
+const smtpSecure = (process.env.SMTP_SECURE || 'true').toLowerCase() !== 'false';
+const smtpUser = (process.env.SMTP_USER || '').trim();
+const smtpPassword = process.env.SMTP_PASSWORD || '';
+const smtpFrom = (process.env.SMTP_FROM || smtpUser).trim();
+
+function escapeHtml(value) {
+  return String(value || '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;');
+}
+
+function createEmailTransporter() {
+  if (!adminNotificationEmail || !smtpHost || !smtpUser || !smtpPassword) {
+    return null;
+  }
+
+  return nodemailer.createTransport({
+    host: smtpHost,
+    port: smtpPort,
+    secure: smtpSecure,
+    auth: {
+      user: smtpUser,
+      pass: smtpPassword,
+    },
+  });
+}
+
+async function sendAdminQnaEmail({ questionId, data }) {
+  const transporter = createEmailTransporter();
+  if (!transporter) {
+    console.log(
+      'QnA email notification is disabled because email settings are empty.',
+    );
+    return;
+  }
+
+  const title = data.title || '제목 없는 질문';
+  const content = data.content || '';
+  const authorName = data.authorName || '익명';
+  const subject = `[DatePDF] 새 Q&A 질문: ${shortText(title, 100)}`;
+  const text = [
+    '새 Q&A 질문이 등록되었습니다.',
+    '',
+    `제목: ${title}`,
+    `작성자: ${authorName}`,
+    `내용: ${content}`,
+    `질문 ID: ${questionId}`,
+  ].join('\n');
+  const html = [
+    '<h2>DatePDF 새 Q&A 질문</h2>',
+    `<p><strong>제목:</strong> ${escapeHtml(title)}</p>`,
+    `<p><strong>작성자:</strong> ${escapeHtml(authorName)}</p>`,
+    `<p><strong>내용:</strong><br>${escapeHtml(content).replaceAll('\n', '<br>')}</p>`,
+    `<p><strong>질문 ID:</strong> ${escapeHtml(questionId)}</p>`,
+  ].join('');
+
+  await transporter.sendMail({
+    from: smtpFrom,
+    to: adminNotificationEmail,
+    subject,
+    text,
+    html,
+  });
+}
 
 function shortText(value, length = 80) {
   const text = String(value || '').trim();
@@ -55,6 +127,15 @@ async function getRegisteredTokens() {
     .map((doc) => doc.data().token || doc.id)
     .filter((token) => typeof token === 'string' && token.length > 0);
 }
+
+exports.notifyAdminOnQnaCreated = functions.firestore
+  .document('qna/{questionId}')
+  .onCreate(async (snapshot, context) => {
+    await sendAdminQnaEmail({
+      questionId: context.params.questionId,
+      data: snapshot.data() || {},
+    });
+  });
 
 exports.notifyOnQnaAnswer = functions.firestore
   .document('qna/{questionId}')
