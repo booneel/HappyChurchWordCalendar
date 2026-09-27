@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -34,8 +36,23 @@ class _AppShellState
 
     // 사용자 화면에서 기다리지 않도록
     // PDF와 제목 카탈로그를 미리 준비.
-    PdfCacheService().preload();
-    PdfCatalogService().loadTitles();
+    unawaited(_preloadAssets());
+  }
+
+  Future<void> _preloadAssets() async {
+    try {
+      await PdfCacheService().preload();
+    } catch (error, stackTrace) {
+      debugPrint('PDF preload failed: $error');
+      debugPrintStack(stackTrace: stackTrace);
+    }
+
+    try {
+      await PdfCatalogService().loadTitles();
+    } catch (error, stackTrace) {
+      debugPrint('PDF title preload failed: $error');
+      debugPrintStack(stackTrace: stackTrace);
+    }
   }
 
   Future<void> _load() async {

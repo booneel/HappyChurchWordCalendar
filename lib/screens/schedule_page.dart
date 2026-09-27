@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import 'pdf_page.dart';
@@ -20,6 +22,8 @@ class _SchedulePageState extends State<SchedulePage> {
 
   DateTime selected = DateTime.now();
   bool titlesLoaded = false;
+  DateTime? _lastTappedDate;
+  DateTime? _lastTappedAt;
 
   @override
   void initState() {
@@ -32,7 +36,17 @@ class _SchedulePageState extends State<SchedulePage> {
   }
 
   Future<void> _openSelected() async {
-    final page = DatePageMapper.pdfPageForDate(selected);
+    late final int page;
+    try {
+      page = DatePageMapper.pdfPageForDate(selected);
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$error')),
+        );
+      }
+      return;
+    }
 
     // "보기"를 직접 눌렀을 때만 조회수 집계.
     await history.recordDirectOpen(page: page, date: selected);
@@ -53,6 +67,25 @@ class _SchedulePageState extends State<SchedulePage> {
     );
   }
 
+  void _onDateChanged(DateTime value) {
+    final now = DateTime.now();
+    final isDoubleTap =
+        _lastTappedDate != null &&
+        _lastTappedAt != null &&
+        DateUtils.isSameDay(_lastTappedDate, value) &&
+        now.difference(_lastTappedAt!) <= const Duration(milliseconds: 450);
+
+    setState(() {
+      selected = value;
+    });
+    _lastTappedDate = value;
+    _lastTappedAt = now;
+
+    if (isDoubleTap) {
+      unawaited(_openSelected());
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final selectedTitle = catalogService.formatTitleForDate(selected);
@@ -71,16 +104,15 @@ class _SchedulePageState extends State<SchedulePage> {
             style: TextStyle(color: Colors.grey.shade600),
           ),
           const SizedBox(height: 18),
-          Card(
-            child: CalendarDatePicker(
-              initialDate: selected,
-              firstDate: DateTime(2020),
-              lastDate: DateTime(2035),
-              onDateChanged: (value) {
-                setState(() {
-                  selected = value;
-                });
-              },
+          GestureDetector(
+            onDoubleTap: () => unawaited(_openSelected()),
+            child: Card(
+              child: CalendarDatePicker(
+                initialDate: selected,
+                firstDate: DateTime(2020),
+                lastDate: DateTime(2035),
+                onDateChanged: _onDateChanged,
+              ),
             ),
           ),
           const SizedBox(height: 16),

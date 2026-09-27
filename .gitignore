@@ -62,4 +62,5 @@ firebase-service-account.json
 nas-data/
 python/.venv/
 python/__pycache__/
+functions/node_modules/
 *.pdf

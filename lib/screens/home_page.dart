@@ -52,17 +52,29 @@ class _HomePageState extends State<HomePage> {
     _pdfFuture = PdfCacheService().getCachedPdf();
 
     // PDF는 홈을 보는 동안 백그라운드에서 미리 준비합니다.
-    PdfCacheService().preload();
-    catalogService.loadTitles().then((_) {
-      if (mounted) {
-        setState(() => _titlesLoaded = true);
-      }
-    });
+    unawaited(_preloadAssets());
     _topPagesSubscription = history.streamTopPages(limit: 3).listen((_) {
       if (mounted) {
         _refresh();
       }
     });
+  }
+
+  Future<void> _preloadAssets() async {
+    try {
+      await PdfCacheService().preload();
+    } catch (error, stackTrace) {
+      debugPrint('PDF preload failed: $error');
+      debugPrintStack(stackTrace: stackTrace);
+    }
+
+    try {
+      await catalogService.loadTitles();
+      if (mounted) setState(() => _titlesLoaded = true);
+    } catch (error, stackTrace) {
+      debugPrint('PDF title loading failed: $error');
+      debugPrintStack(stackTrace: stackTrace);
+    }
   }
 
   @override

@@ -75,6 +75,8 @@ class QuestionPayload(BaseModel):
     title: str = ""
     content: str = ""
     authorName: str = "사용자"
+    authorDeviceId: str | None = None
+    notificationToken: str | None = None
     createdAt: str | None = None
     answer: str | None = None
     answeredAt: str | None = None

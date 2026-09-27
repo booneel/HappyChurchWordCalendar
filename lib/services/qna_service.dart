@@ -7,12 +7,15 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'backend_config.dart';
 import 'nas_api_client.dart';
+import 'notification_service.dart';
 
 class QnaItem {
   final String id;
   final String title;
   final String content;
   final String authorName;
+  final String? authorDeviceId;
+  final String? notificationToken;
   final DateTime createdAt;
   final String? answer;
   final DateTime? answeredAt;
@@ -24,6 +27,8 @@ class QnaItem {
     required this.title,
     required this.content,
     required this.authorName,
+    this.authorDeviceId,
+    this.notificationToken,
     required this.createdAt,
     this.answer,
     this.answeredAt,
@@ -36,6 +41,8 @@ class QnaItem {
         'title': title,
         'content': content,
         'authorName': authorName,
+        'authorDeviceId': authorDeviceId,
+        'notificationToken': notificationToken,
         'createdAt': createdAt.toIso8601String(),
         'answer': answer,
         'answeredAt': answeredAt?.toIso8601String(),
@@ -49,6 +56,8 @@ class QnaItem {
       title: json['title'] as String? ?? '',
       content: json['content'] as String? ?? '',
       authorName: json['authorName'] as String? ?? '익명',
+      authorDeviceId: json['authorDeviceId'] as String?,
+      notificationToken: json['notificationToken'] as String?,
       createdAt: DateTime.tryParse(json['createdAt']?.toString() ?? '') ??
           DateTime.now(),
       answer: json['answer'] as String?,
@@ -65,6 +74,8 @@ class QnaItem {
       title: data['title'] as String? ?? '',
       content: data['content'] as String? ?? '',
       authorName: data['authorName'] as String? ?? '익명',
+      authorDeviceId: data['authorDeviceId'] as String?,
+      notificationToken: data['notificationToken'] as String?,
       createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
       answer: data['answer'] as String?,
       answeredAt: (data['answeredAt'] as Timestamp?)?.toDate(),
@@ -104,12 +115,17 @@ class QnaService {
     final id =
         '${DateTime.now().microsecondsSinceEpoch}-${_random.nextInt(0x7fffffff).toRadixString(16)}';
     final now = DateTime.now();
+    final authorDeviceId = await NotificationService.instance.getDeviceId();
+    final notificationToken =
+        await NotificationService.instance.getFcmToken();
 
     final newItem = QnaItem(
       id: id,
       title: title.trim(),
       content: content.trim(),
       authorName: authorName.trim().isEmpty ? '사용자' : authorName.trim(),
+      authorDeviceId: authorDeviceId,
+      notificationToken: notificationToken,
       createdAt: now,
       isAnswered: false,
       isReadByAdmin: false,
@@ -131,6 +147,8 @@ class QnaService {
         'title': title.trim(),
         'content': content.trim(),
         'authorName': authorName.trim().isEmpty ? '사용자' : authorName.trim(),
+        'authorDeviceId': authorDeviceId,
+        'notificationToken': notificationToken,
         'createdAt': FieldValue.serverTimestamp(),
         'isAnswered': false,
         'isReadByAdmin': false,
@@ -223,6 +241,8 @@ class QnaService {
           title: q.title,
           content: q.content,
           authorName: q.authorName,
+          authorDeviceId: q.authorDeviceId,
+          notificationToken: q.notificationToken,
           createdAt: q.createdAt,
           answer: answer.trim(),
           answeredAt: now,

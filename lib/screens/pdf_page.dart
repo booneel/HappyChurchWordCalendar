@@ -32,6 +32,7 @@ class _PdfPageState extends State<PdfPage> {
   late int page;
   late Future<File> pdfFuture;
   late String title;
+  Axis _scrollDirection = Axis.horizontal;
 
   final PdfCatalogService catalog = PdfCatalogService.instance;
 
@@ -88,6 +89,23 @@ class _PdfPageState extends State<PdfPage> {
           style: const TextStyle(fontSize: 16),
         ),
         actions: [
+          IconButton(
+            tooltip: _scrollDirection == Axis.horizontal
+                ? '위아래로 넘기기'
+                : '좌우로 넘기기',
+            onPressed: () {
+              setState(() {
+                _scrollDirection = _scrollDirection == Axis.horizontal
+                    ? Axis.vertical
+                    : Axis.horizontal;
+              });
+            },
+            icon: Icon(
+              _scrollDirection == Axis.horizontal
+                  ? Icons.swap_vert
+                  : Icons.swap_horiz,
+            ),
+          ),
           Padding(
             padding: const EdgeInsets.only(right: 16),
             child: Center(
@@ -118,6 +136,7 @@ class _PdfPageState extends State<PdfPage> {
           return _SinglePagePdfViewer(
             file: snapshot.data!,
             initialPage: page,
+            scrollDirection: _scrollDirection,
             onPageChanged: (newPage) {
               if (!mounted || page == newPage) return;
 
@@ -138,11 +157,13 @@ class _PdfPageState extends State<PdfPage> {
 class _SinglePagePdfViewer extends StatefulWidget {
   final File file;
   final int initialPage;
+  final Axis scrollDirection;
   final ValueChanged<int> onPageChanged;
 
   const _SinglePagePdfViewer({
     required this.file,
     required this.initialPage,
+    required this.scrollDirection,
     required this.onPageChanged,
   });
 
@@ -208,7 +229,7 @@ class _SinglePagePdfViewerState extends State<_SinglePagePdfViewer> {
           color: const Color(0xff202124),
           child: PageView.builder(
             controller: _pageController,
-            scrollDirection: Axis.horizontal,
+            scrollDirection: widget.scrollDirection,
             itemCount: document.pages.length,
             onPageChanged: (index) => widget.onPageChanged(index + 1),
             itemBuilder: (context, index) {
