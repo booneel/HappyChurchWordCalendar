@@ -84,17 +84,17 @@ class PdfCatalogBuilderService {
     _cancelRequested = false;
 
     final yearStart = DateTime(year, 1, 1);
-    final dayCount = DateTime(year, 12, 31).difference(yearStart).inDays + 1;
+    final dayCount = DatePageMapper.dailyPageCount;
 
-    if (dayCount != 365) {
+    if (dayCount < 1) {
       throw ArgumentError('$year년은 윤년입니다. 현재 PDF는 365일 기준입니다.');
     }
 
-    onProgress(0, 365, 'PDF 준비 중...');
+    onProgress(0, dayCount, 'PDF 준비 중...');
 
     final file = await _cache.getCachedPdf();
 
-    onProgress(0, 365, 'PDF 열기...');
+    onProgress(0, dayCount, 'PDF 열기...');
 
     final document = await PdfDocument.openFile(file.path);
 
@@ -113,7 +113,7 @@ class PdfCatalogBuilderService {
     final failed = <String>[];
 
     try {
-      for (int index = 0; index < DatePageMapper.dailyPageCount; index++) {
+      for (int index = 0; index < dayCount; index++) {
         if (_cancelRequested) break;
 
         final date = yearStart.add(Duration(days: index));
@@ -122,7 +122,7 @@ class PdfCatalogBuilderService {
 
         onProgress(
           index + 1,
-          DatePageMapper.dailyPageCount,
+          dayCount,
           '$key · PDF $pageNumber 제목 및 레이아웃 문맥 분석 중',
         );
 
@@ -275,8 +275,8 @@ class PdfCatalogBuilderService {
       confidence: dateIndex < 0
           ? 0.48
           : titleLines.length == 1
-              ? 0.58
-              : 0.63,
+          ? 0.58
+          : 0.63,
     );
   }
 
@@ -314,8 +314,7 @@ class PdfCatalogBuilderService {
         bottom: centerY - height / 2,
         height: height,
       );
-    }).toList()
-      ..sort((a, b) => b.centerY.compareTo(a.centerY));
+    }).toList()..sort((a, b) => b.centerY.compareTo(a.centerY));
   }
 
   ExtractedTitleInfo? _extractTitleFromLayout(List<_LayoutLine> lines) {
@@ -339,21 +338,21 @@ class PdfCatalogBuilderService {
     return best;
   }
 
-  ExtractedTitleInfo? _extractRankedLayoutCandidate(
-    List<_LayoutLine> lines,
-  ) {
+  ExtractedTitleInfo? _extractRankedLayoutCandidate(List<_LayoutLine> lines) {
     if (lines.isEmpty) return null;
 
     final ordered = [...lines]..sort((a, b) => b.centerY.compareTo(a.centerY));
     final dateLines = ordered.where((line) => _isDateText(line.text)).toList();
-    final bodyHeights = ordered
-        .where((line) => _isLikelyBodyLine(line.text, line.height))
-        .map((line) => line.height)
-        .where((height) => height > 0)
-        .toList()
-      ..sort();
-    final typicalBodyHeight =
-        bodyHeights.isEmpty ? 0.02 : bodyHeights[bodyHeights.length ~/ 2];
+    final bodyHeights =
+        ordered
+            .where((line) => _isLikelyBodyLine(line.text, line.height))
+            .map((line) => line.height)
+            .where((height) => height > 0)
+            .toList()
+          ..sort();
+    final typicalBodyHeight = bodyHeights.isEmpty
+        ? 0.02
+        : bodyHeights[bodyHeights.length ~/ 2];
 
     ExtractedTitleInfo? best;
     var bestScore = -double.infinity;
@@ -379,15 +378,15 @@ class PdfCatalogBuilderService {
 
         final averageY =
             group.map((line) => line.centerY).reduce((a, b) => a + b) /
-                group.length;
+            group.length;
         final averageHeight =
             group.map((line) => line.height).reduce((a, b) => a + b) /
-                group.length;
+            group.length;
         final nearestDateGap = dateLines.isEmpty
             ? 0.0
             : dateLines
-                .map((line) => (line.centerY - averageY).abs())
-                .reduce((a, b) => a < b ? a : b);
+                  .map((line) => (line.centerY - averageY).abs())
+                  .reduce((a, b) => a < b ? a : b);
 
         if (dateLines.isNotEmpty &&
             nearestDateGap < dateLines.first.height * 0.45) {
@@ -399,8 +398,9 @@ class PdfCatalogBuilderService {
         final dateScore = dateLines.isEmpty
             ? 0.0
             : (0.24 - nearestDateGap).clamp(0.0, 0.24) * 0.85;
-        final lengthScore =
-            phrase.length >= 3 && phrase.length <= 32 ? 0.10 : 0.0;
+        final lengthScore = phrase.length >= 3 && phrase.length <= 32
+            ? 0.10
+            : 0.0;
         final lineScore = group.length == 1 ? 0.04 : 0.08;
         final score = 0.45 + heightScore + dateScore + lengthScore + lineScore;
 
@@ -480,15 +480,16 @@ class PdfCatalogBuilderService {
     }
     final heightRatio =
         titleLines.map((e) => e.height).reduce((a, b) => a + b) /
-            titleLines.length /
-            (nextBody.height == 0 ? 1 : nextBody.height);
+        titleLines.length /
+        (nextBody.height == 0 ? 1 : nextBody.height);
     final lengthScore = title.length <= 45 ? 0.08 : -0.08;
     final lineScore = titleLines.length <= 2 ? 0.08 : 0.0;
-    final confidence = ((hasBodyLine ? 0.74 : 0.62) +
-            (heightRatio - 1.0).clamp(0.0, 0.18) +
-            lengthScore +
-            lineScore)
-        .clamp(0.45, 0.98);
+    final confidence =
+        ((hasBodyLine ? 0.74 : 0.62) +
+                (heightRatio - 1.0).clamp(0.0, 0.18) +
+                lengthScore +
+                lineScore)
+            .clamp(0.45, 0.98);
 
     return ExtractedTitleInfo(title: title, confidence: confidence);
   }
@@ -503,7 +504,8 @@ class PdfCatalogBuilderService {
     if (nextText.isEmpty || _isHappyChurch(nextText)) return false;
 
     final heightRatio = next.height / (line.height == 0 ? 1 : line.height);
-    final closeInLineSpacing = (next.centerY - line.centerY).abs() <=
+    final closeInLineSpacing =
+        (next.centerY - line.centerY).abs() <=
         (line.height * 3.2).clamp(0.04, 0.18);
     final aligned =
         (next.pieces.first.left - line.pieces.first.left).abs() < 0.12;
@@ -781,8 +783,9 @@ class PdfCatalogBuilderService {
     var value = unique.join(' ');
 
     final tokens = value.split(RegExp(r'\s+'));
-    final singleCharacterTokens =
-        tokens.where((token) => token.runes.length == 1).length;
+    final singleCharacterTokens = tokens
+        .where((token) => token.runes.length == 1)
+        .length;
     if (tokens.length >= 4 && singleCharacterTokens / tokens.length >= 0.75) {
       value = tokens.join();
     }

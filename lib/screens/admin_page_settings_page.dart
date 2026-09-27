@@ -22,6 +22,7 @@ class _AdminPageSettingsPageState extends State<AdminPageSettingsPage> {
 
   int _startPage = 4;
   int _pageCount = 365;
+  int _pdfPageCount = 368;
   final int _year = DateTime.now().year;
 
   @override
@@ -43,9 +44,15 @@ class _AdminPageSettingsPageState extends State<AdminPageSettingsPage> {
     setState(() => _loading = true);
 
     try {
-      final settings = await _settingsService.loadSettings();
+      final settings = await _settingsService.loadSettings(forceRefresh: true);
       _startPage = settings.dailyStartPdfPage;
       _pageCount = settings.dailyPageCount;
+      _pdfPageCount = settings.pdfPageCount;
+
+      final availableDays = _availableDayCount(_startPage);
+      if (_pageCount > availableDays) {
+        _pageCount = availableDays;
+      }
 
       _startPageController.text = _startPage.toString();
       _pageCountController.text = _pageCount.toString();
@@ -67,8 +74,21 @@ class _AdminPageSettingsPageState extends State<AdminPageSettingsPage> {
       return;
     }
 
+    if (startInput > _pdfPageCount) {
+      _showSnackBar('시작 페이지는 PDF 전체 페이지 수($_pdfPageCount)보다 클 수 없습니다.');
+      return;
+    }
+
     if (countInput == null || countInput < 1 || countInput > 366) {
-      _showSnackBar('총 일수는 1~366 범위 내여야 합니다.');
+      _showSnackBar('1~366일 범위로 입력해 주세요.');
+      return;
+    }
+
+    final availableDays = _availableDayCount(startInput);
+    if (countInput > availableDays) {
+      _showSnackBar(
+        '현재 PDF에서 매핑할 수 있는 날짜는 최대 $availableDays일입니다. 페이지 수와 시작 페이지를 확인해 주세요.',
+      );
       return;
     }
 
@@ -78,6 +98,7 @@ class _AdminPageSettingsPageState extends State<AdminPageSettingsPage> {
       await _settingsService.saveSettings(
         dailyStartPdfPage: startInput,
         dailyPageCount: countInput,
+        pdfPageCount: _pdfPageCount,
       );
 
       setState(() {
@@ -87,9 +108,9 @@ class _AdminPageSettingsPageState extends State<AdminPageSettingsPage> {
 
       if (!mounted) return;
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('날짜/페이지 매핑 설정이 저장되었습니다.')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('날짜/페이지 매핑 설정이 저장되었습니다.')));
     } catch (e) {
       _showError('설정 저장 중 오류가 발생했습니다: $e');
     } finally {
@@ -100,9 +121,8 @@ class _AdminPageSettingsPageState extends State<AdminPageSettingsPage> {
   }
 
   void _showSnackBar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
   }
 
   void _showError(String message) {
@@ -110,9 +130,7 @@ class _AdminPageSettingsPageState extends State<AdminPageSettingsPage> {
       context: context,
       builder: (_) => AlertDialog(
         title: const Text('오류'),
-        content: SingleChildScrollView(
-          child: SelectableText(message),
-        ),
+        content: SingleChildScrollView(child: SelectableText(message)),
         actions: [
           FilledButton(
             onPressed: () => Navigator.pop(context),
@@ -123,10 +141,24 @@ class _AdminPageSettingsPageState extends State<AdminPageSettingsPage> {
     );
   }
 
+  int _availableDayCount(int startPage) {
+    final remainingPages = _pdfPageCount - startPage + 1;
+    if (remainingPages < 1) return 0;
+    return remainingPages > 366 ? 366 : remainingPages;
+  }
+
+  int _mappedDayCount(int availableDays) {
+    if (_pageCount < 1) return 0;
+    return _pageCount < availableDays ? _pageCount : availableDays;
+  }
+
   @override
   Widget build(BuildContext context) {
     final yearStart = DateTime(_year, 1, 1);
-    final endPage = _startPage + _pageCount - 1;
+    final availableDays = _availableDayCount(_startPage);
+    final mappedDayCount = _mappedDayCount(availableDays);
+    final endPage =
+        mappedDayCount > 0 ? _startPage + mappedDayCount - 1 : _startPage;
 
     return Scaffold(
       appBar: AppBar(
@@ -147,7 +179,8 @@ class _AdminPageSettingsPageState extends State<AdminPageSettingsPage> {
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : Column(
+          : ListView(
+              padding: const EdgeInsets.only(bottom: 24),
               children: [
                 // 1. 설정 입력 카드
                 Padding(
@@ -187,7 +220,16 @@ class _AdminPageSettingsPageState extends State<AdminPageSettingsPage> {
                                 onChanged: (val) {
                                   final parsed = int.tryParse(val);
                                   if (parsed != null && parsed >= 1) {
-                                    setState(() => _startPage = parsed);
+                                    setState(() {
+                                      _startPage = parsed;
+                                      final availableDays =
+                                          _availableDayCount(parsed);
+                                      if (_pageCount > availableDays) {
+                                        _pageCount = availableDays;
+                                        _pageCountController.text =
+                                            availableDays.toString();
+                                      }
+                                    });
                                   }
                                 },
                               );
@@ -249,7 +291,7 @@ class _AdminPageSettingsPageState extends State<AdminPageSettingsPage> {
                               );
                             },
                             icon: const Icon(Icons.list_alt_outlined),
-                            label: const Text('365일 제목 카탈로그 관리 이동'),
+                            label: Text('$mappedDayCount일 제목 카탈로그 관리 이동'),
                           ),
                         ],
                       ),
@@ -259,8 +301,10 @@ class _AdminPageSettingsPageState extends State<AdminPageSettingsPage> {
 
                 // 2. 미리보기 헤더
                 Padding(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 6,
+                  ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -280,83 +324,100 @@ class _AdminPageSettingsPageState extends State<AdminPageSettingsPage> {
                           fontWeight: FontWeight.w600,
                         ),
                       ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'PDF 전체 $_pdfPageCount페이지 · 날짜 매핑 $mappedDayCount일',
+                        style: TextStyle(
+                          color: Colors.grey.shade600,
+                          fontSize: 12,
+                        ),
+                      ),
+                      if (_pageCount > availableDays)
+                        Text(
+                          '현재 시작 페이지 기준 최대 매핑 일수: $availableDays일',
+                          style: TextStyle(
+                            color: Colors.red.shade700,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
                     ],
                   ),
                 ),
 
-                // 3. 365일 매핑 리스트
-                Expanded(
-                  child: ListView.separated(
-                    itemCount: _pageCount,
-                    separatorBuilder: (_, __) => const Divider(height: 1),
-                    itemBuilder: (context, index) {
-                      final date = yearStart.add(Duration(days: index));
-                      final pdfPage = _startPage + index;
-                      final isToday = DateTime.now().year == date.year &&
-                          DateTime.now().month == date.month &&
-                          DateTime.now().day == date.day;
+                // 3. PDF 페이지와 날짜 매핑 리스트
+                ListView.separated(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: mappedDayCount,
+                  separatorBuilder: (_, __) => const Divider(height: 1),
+                  itemBuilder: (context, index) {
+                    final date = yearStart.add(Duration(days: index));
+                    final pdfPage = _startPage + index;
+                    final isToday = DateTime.now().year == date.year &&
+                        DateTime.now().month == date.month &&
+                        DateTime.now().day == date.day;
 
-                      return ListTile(
-                        tileColor: isToday ? Colors.amber.shade50 : null,
-                        leading: SizedBox(
-                          width: 80,
-                          child: Text(
-                            DateFormat('M월 d일 (E)', 'ko_KR').format(date),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontWeight:
-                                  isToday ? FontWeight.w800 : FontWeight.w600,
-                              color: isToday
-                                  ? const Color(0xFF4F7CAC)
-                                  : Colors.black87,
-                            ),
-                          ),
-                        ),
-                        title: Text(
-                          'PDF $pdfPage 페이지',
-                          maxLines: 1,
+                    return ListTile(
+                      tileColor: isToday ? Colors.amber.shade50 : null,
+                      leading: SizedBox(
+                        width: 80,
+                        child: Text(
+                          DateFormat('M월 d일 (E)', 'ko_KR').format(date),
+                          maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                             fontWeight:
                                 isToday ? FontWeight.w800 : FontWeight.w600,
+                            color: isToday
+                                ? const Color(0xFF4F7CAC)
+                                : Colors.black87,
                           ),
                         ),
-                        trailing: isToday
-                            ? Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 8,
-                                  vertical: 4,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFF4F7CAC),
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: const Text(
-                                  '오늘',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                              )
-                            : SizedBox(
-                                width: 58,
-                                child: Text(
-                                  '${index + 1}번째 날',
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                  textAlign: TextAlign.end,
-                                  style: TextStyle(
-                                    color: Colors.grey.shade500,
-                                    fontSize: 12,
-                                  ),
+                      ),
+                      title: Text(
+                        'PDF $pdfPage 페이지',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontWeight:
+                              isToday ? FontWeight.w800 : FontWeight.w600,
+                        ),
+                      ),
+                      trailing: isToday
+                          ? Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF4F7CAC),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: const Text(
+                                '오늘',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
                                 ),
                               ),
-                      );
-                    },
-                  ),
+                            )
+                          : SizedBox(
+                              width: 58,
+                              child: Text(
+                                '${index + 1}번째 날',
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                textAlign: TextAlign.end,
+                                style: TextStyle(
+                                  color: Colors.grey.shade500,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ),
+                    );
+                  },
                 ),
               ],
             ),

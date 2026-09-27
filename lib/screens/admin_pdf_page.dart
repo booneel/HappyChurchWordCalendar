@@ -5,11 +5,15 @@ import 'package:file_picker/file_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:pdfrx/pdfrx.dart' as pdfrx;
 
 import '../services/pdf_cache_service.dart';
+import '../services/date_page_mapper.dart';
 import '../services/pdf_settings_service.dart';
 import '../services/backend_config.dart';
 import '../services/nas_api_client.dart';
+
+// ignore_for_file: unnecessary_brace_in_string_interps
 
 class AdminPdfPage extends StatefulWidget {
   const AdminPdfPage({super.key});
@@ -31,6 +35,8 @@ class _AdminPdfPageState extends State<AdminPdfPage> {
   String _uploadStatus = '';
 
   // Remote metadata
+  String _currentOriginalName = '';
+  int? _currentPdfPageCount;
   String _currentFileName = '365일 매일묵상말씀.pdf';
   int? _currentSizeBytes;
   DateTime? _currentUpdatedTime;
@@ -38,6 +44,8 @@ class _AdminPdfPageState extends State<AdminPdfPage> {
   // Selected local file to upload
   PlatformFile? _pickedFile;
   int? _pickedFileSize;
+  int? _pickedPdfPageCount;
+  bool _readingPdfPageCount = false;
 
   @override
   void initState() {
@@ -49,16 +57,23 @@ class _AdminPdfPageState extends State<AdminPdfPage> {
     setState(() => _loading = true);
 
     try {
-      final settings = await _settingsService.loadSettings();
+      final settings = await _settingsService.loadSettings(forceRefresh: true);
       _currentFileName = settings.pdfFileName;
+      _currentOriginalName = settings.pdfFileName;
+      _currentPdfPageCount = settings.pdfPageCount;
 
       if (BackendConfig.useNas) {
         final data = await _nas.getJson('/api/pdf/current/metadata');
         _currentFileName =
             (data['fileName'] as String?)?.trim() ?? _currentFileName;
+        _currentOriginalName =
+            (data['originalName'] as String?)?.trim() ?? _currentFileName;
         _currentSizeBytes = (data['fileSize'] as num?)?.toInt();
-        _currentUpdatedTime =
-            DateTime.tryParse(data['updatedAt']?.toString() ?? '');
+        _currentPdfPageCount =
+            (data['pdfPageCount'] as num?)?.toInt() ?? _currentPdfPageCount;
+        _currentUpdatedTime = DateTime.tryParse(
+          data['updatedAt']?.toString() ?? '',
+        );
         return;
       }
 
@@ -69,8 +84,14 @@ class _AdminPdfPageState extends State<AdminPdfPage> {
         if (data['fileName'] != null) {
           _currentFileName = data['fileName'] as String;
         }
+        if (data['originalName'] != null) {
+          _currentOriginalName = data['originalName'] as String;
+        }
         if (data['fileSize'] != null) {
           _currentSizeBytes = (data['fileSize'] as num).toInt();
+        }
+        if (data['pdfPageCount'] != null) {
+          _currentPdfPageCount = (data['pdfPageCount'] as num).toInt();
         }
         if (data['updatedAt'] != null) {
           _currentUpdatedTime = (data['updatedAt'] as Timestamp).toDate();
@@ -102,17 +123,49 @@ class _AdminPdfPageState extends State<AdminPdfPage> {
         _showSnackBar('PDF 파일만 선택할 수 있습니다.');
         return;
       }
+      if (picked.path == null) {
+        _showSnackBar('선택한 PDF 파일의 경로를 읽지 못했습니다.');
+        return;
+      }
       final length = picked.lengthSync() ?? await picked.length();
       setState(() {
         _pickedFile = picked;
         _pickedFileSize = length;
+        _pickedPdfPageCount = null;
+        _readingPdfPageCount = true;
       });
+
+      try {
+        final document = await pdfrx.PdfDocument.openFile(picked.path!);
+        final pageCount = document.pages.length;
+        await document.dispose();
+        if (!mounted) return;
+        setState(() {
+          _pickedPdfPageCount = pageCount;
+          _readingPdfPageCount = false;
+        });
+      } catch (_) {
+        if (!mounted) return;
+        setState(() => _readingPdfPageCount = false);
+        _showSnackBar('PDF 페이지 수를 읽지 못했습니다. 파일을 확인해 주세요.');
+      }
     }
+  }
+
+  int _dailyCountForPdf({required int totalPages, required int startPage}) {
+    final availablePages = totalPages - startPage + 1;
+    if (availablePages < 1) return 0;
+    return availablePages > 366 ? 366 : availablePages;
   }
 
   Future<void> _uploadAndReplacePdf() async {
     if (_pickedFile == null || _pickedFile?.path == null) {
       _showSnackBar('교체할 PDF 파일을 선택해 주세요.');
+      return;
+    }
+
+    if (_readingPdfPageCount || _pickedPdfPageCount == null) {
+      _showSnackBar('PDF 페이지 수를 확인하는 중입니다. 잠시 후 다시 시도해 주세요.');
       return;
     }
 
@@ -124,6 +177,12 @@ class _AdminPdfPageState extends State<AdminPdfPage> {
     }
 
     final fileSize = _pickedFileSize ?? await _pickedFile!.length() ?? 0;
+    final pickedPdfPageCount = _pickedPdfPageCount!;
+    final settings = await _settingsService.loadSettings();
+    final dailyPageCount = _dailyCountForPdf(
+      totalPages: pickedPdfPageCount,
+      startPage: settings.dailyStartPdfPage,
+    );
 
     if (!mounted) return;
 
@@ -162,18 +221,22 @@ class _AdminPdfPageState extends State<AdminPdfPage> {
 
     try {
       if (BackendConfig.useNas) {
-        await _nas.uploadPdf(
-          fileToUpload,
-          fileName: _pickedFile!.name,
-        );
+        await _nas.uploadPdf(fileToUpload, fileName: _pickedFile!.name);
         await _cacheService.refresh();
 
         if (!mounted) return;
         setState(() {
           _pickedFile = null;
           _pickedFileSize = null;
+          _pickedPdfPageCount = null;
           _uploading = false;
         });
+        await _settingsService.saveSettings(
+          dailyStartPdfPage: settings.dailyStartPdfPage,
+          dailyPageCount: dailyPageCount,
+          pdfPageCount: pickedPdfPageCount,
+          pdfFileName: _currentFileName,
+        );
         await _loadCurrentPdfInfo();
         if (!mounted) return;
         await showDialog<void>(
@@ -227,16 +290,15 @@ class _AdminPdfPageState extends State<AdminPdfPage> {
       final downloadUrl = await storageRef.getDownloadURL();
 
       // Firestore pdf_documents/current 업데이트
-      await _db.collection('pdf_documents').doc('current').set(
-        {
-          'pdfUrl': downloadUrl,
-          'fileName': _currentFileName,
-          'fileSize': fileSize,
-          'originalName': _pickedFile!.name,
-          'updatedAt': FieldValue.serverTimestamp(),
-        },
-        SetOptions(merge: true),
-      );
+      await _db.collection('pdf_documents').doc('current').set({
+        'pdfUrl': downloadUrl,
+        'fileName': _currentFileName,
+        'fileSize': fileSize,
+        'pdfPageCount': pickedPdfPageCount,
+        'dailyPageCount': dailyPageCount,
+        'originalName': _pickedFile!.name,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
 
       // 로컬 PDF 캐시 강제 새로고침
       await _cacheService.refresh();
@@ -246,8 +308,16 @@ class _AdminPdfPageState extends State<AdminPdfPage> {
       setState(() {
         _pickedFile = null;
         _pickedFileSize = null;
+        _pickedPdfPageCount = null;
         _uploading = false;
       });
+
+      await _settingsService.saveSettings(
+        dailyStartPdfPage: settings.dailyStartPdfPage,
+        dailyPageCount: dailyPageCount,
+        pdfPageCount: pickedPdfPageCount,
+        pdfFileName: _currentFileName,
+      );
 
       await _loadCurrentPdfInfo();
 
@@ -289,9 +359,8 @@ class _AdminPdfPageState extends State<AdminPdfPage> {
   }
 
   void _showSnackBar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
   }
 
   void _showErrorDialog(String message) {
@@ -299,9 +368,7 @@ class _AdminPdfPageState extends State<AdminPdfPage> {
       context: context,
       builder: (_) => AlertDialog(
         title: const Text('오류'),
-        content: SingleChildScrollView(
-          child: SelectableText(message),
-        ),
+        content: SingleChildScrollView(child: SelectableText(message)),
         actions: [
           FilledButton(
             onPressed: () => Navigator.pop(context),
@@ -335,9 +402,10 @@ class _AdminPdfPageState extends State<AdminPdfPage> {
                 // 1. 현재 적용된 PDF 카드
                 Text(
                   '📄 현재 저장소 PDF 정보',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w800,
-                      ),
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleMedium
+                      ?.copyWith(fontWeight: FontWeight.w800),
                 ),
                 const SizedBox(height: 10),
 
@@ -357,8 +425,10 @@ class _AdminPdfPageState extends State<AdminPdfPage> {
                                     .primaryContainer,
                                 borderRadius: BorderRadius.circular(12),
                               ),
-                              child: const Icon(Icons.picture_as_pdf,
-                                  color: Color(0xFF4F7CAC)),
+                              child: const Icon(
+                                Icons.picture_as_pdf,
+                                color: Color(0xFF4F7CAC),
+                              ),
                             ),
                             const SizedBox(width: 14),
                             Expanded(
@@ -366,7 +436,9 @@ class _AdminPdfPageState extends State<AdminPdfPage> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
-                                    _currentFileName,
+                                    _currentOriginalName.isNotEmpty
+                                        ? _currentOriginalName
+                                        : _currentFileName,
                                     maxLines: 2,
                                     overflow: TextOverflow.ellipsis,
                                     style: const TextStyle(
@@ -384,6 +456,14 @@ class _AdminPdfPageState extends State<AdminPdfPage> {
                                       fontSize: 13,
                                     ),
                                   ),
+                                  if (_currentPdfPageCount != null)
+                                    Text(
+                                      'PDF 전체 ${_currentPdfPageCount}페이지 · 날짜 매핑 ${DatePageMapper.dailyPageCount}일',
+                                      style: TextStyle(
+                                        color: Colors.grey.shade600,
+                                        fontSize: 12,
+                                      ),
+                                    ),
                                 ],
                               ),
                             ),
@@ -424,9 +504,10 @@ class _AdminPdfPageState extends State<AdminPdfPage> {
                 // 2. 새 PDF 선택 및 업로드
                 Text(
                   '📤 새 PDF 파일 교체',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w800,
-                      ),
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleMedium
+                      ?.copyWith(fontWeight: FontWeight.w800),
                 ),
                 const SizedBox(height: 10),
 
@@ -454,8 +535,10 @@ class _AdminPdfPageState extends State<AdminPdfPage> {
                             ),
                             child: Row(
                               children: [
-                                const Icon(Icons.file_present,
-                                    color: Color(0xFF4F7CAC)),
+                                const Icon(
+                                  Icons.file_present,
+                                  color: Color(0xFF4F7CAC),
+                                ),
                                 const SizedBox(width: 12),
                                 Expanded(
                                   child: Column(
@@ -479,6 +562,22 @@ class _AdminPdfPageState extends State<AdminPdfPage> {
                                             fontSize: 12,
                                           ),
                                         ),
+                                      if (_readingPdfPageCount)
+                                        Text(
+                                          'PDF 페이지 수 확인 중...',
+                                          style: TextStyle(
+                                            color: Colors.grey.shade700,
+                                            fontSize: 12,
+                                          ),
+                                        )
+                                      else if (_pickedPdfPageCount != null)
+                                        Text(
+                                          '전체 ${_pickedPdfPageCount}페이지 · 매핑 일수 ${_dailyCountForPdf(totalPages: _pickedPdfPageCount!, startPage: _settingsService.currentSettings.dailyStartPdfPage)}일',
+                                          style: TextStyle(
+                                            color: Colors.grey.shade700,
+                                            fontSize: 12,
+                                          ),
+                                        ),
                                     ],
                                   ),
                                 ),
@@ -489,6 +588,8 @@ class _AdminPdfPageState extends State<AdminPdfPage> {
                                       : () => setState(() {
                                             _pickedFile = null;
                                             _pickedFileSize = null;
+                                            _pickedPdfPageCount = null;
+                                            _readingPdfPageCount = false;
                                           }),
                                   icon: const Icon(Icons.close),
                                 ),
@@ -555,9 +656,9 @@ class _AdminPdfPageState extends State<AdminPdfPage> {
                         SizedBox(width: 12),
                         Expanded(
                           child: Text(
-                            'PDF 파일을 교체하면 Firebase Storage의 기존 파일이 업데이트됩니다. '
-                            '사용자 기기에서는 6시간마다 또는 앱 실행 시 자동으로 새 PDF를 감지하여 교체합니다.',
-                            style: TextStyle(fontSize: 13),
+                            'PDF를 교체하면 서버에 새 파일이 저장되고 사용자에게 업데이트 알림이 전송됩니다. '
+                            '사용자 앱은 알림을 받거나 다시 실행할 때 새 PDF를 확인하며, 인터넷이 없으면 저장된 PDF를 계속 보여줍니다.',
+                            style: TextStyle(fontSize: 13, height: 1.45),
                           ),
                         ),
                       ],

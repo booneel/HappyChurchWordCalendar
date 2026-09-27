@@ -4,23 +4,37 @@ class DatePageMapper {
   static int get dailyStartPdfPage =>
       PdfSettingsService.instance.currentSettings.dailyStartPdfPage;
 
-  static int get dailyPageCount =>
-      PdfSettingsService.instance.currentSettings.dailyPageCount;
+  static int get dailyPageCount {
+    final settings = PdfSettingsService.instance.currentSettings;
+    final availablePages =
+        settings.pdfPageCount - settings.dailyStartPdfPage + 1;
+    if (availablePages < 1) return 0;
+    return settings.dailyPageCount < availablePages
+        ? settings.dailyPageCount
+        : availablePages;
+  }
 
   static int pdfPageForDate(DateTime date, {int? startPage}) {
-    final yearStart = DateTime(date.year, 1, 1);
-    final daysInYear =
-        DateTime(date.year, 12, 31).difference(yearStart).inDays + 1;
-
-    if (daysInYear != 365) {
+    final page = pdfPageForDateOrNull(date, startPage: startPage);
+    if (page == null) {
       throw ArgumentError(
-        '현재 PDF는 365일 기준입니다. 윤년 PDF는 별도 매핑이 필요합니다.',
+        '이 날짜에 연결된 PDF 페이지가 없습니다: ${date.year}-${date.month}-${date.day}',
       );
     }
+    return page;
+  }
 
+  static int? pdfPageForDateOrNull(DateTime date, {int? startPage}) {
+    final yearStart = DateTime(date.year, 1, 1);
     final effectiveStart = startPage ?? dailyStartPdfPage;
     final dayOfYear = date.difference(yearStart).inDays + 1;
+
+    if (dayOfYear < 1 || dayOfYear > dailyPageCount) return null;
     return effectiveStart + dayOfYear - 1;
+  }
+
+  static bool isDateAvailable(DateTime date, {int? startPage}) {
+    return pdfPageForDateOrNull(date, startPage: startPage) != null;
   }
 
   static DateTime dateForPdfPage(
@@ -32,20 +46,18 @@ class DatePageMapper {
     final effectiveStart = startPage ?? dailyStartPdfPage;
     final effectiveCount = pageCount ?? dailyPageCount;
 
-    if (!isDailyPage(pdfPage, startPage: effectiveStart, pageCount: effectiveCount)) {
+    if (!isDailyPage(
+      pdfPage,
+      startPage: effectiveStart,
+      pageCount: effectiveCount,
+    )) {
       throw ArgumentError('일일 말씀 페이지 범위가 아닙니다: $pdfPage');
     }
 
-    return DateTime(year, 1, 1).add(
-      Duration(days: pdfPage - effectiveStart),
-    );
+    return DateTime(year, 1, 1).add(Duration(days: pdfPage - effectiveStart));
   }
 
-  static bool isDailyPage(
-    int pdfPage, {
-    int? startPage,
-    int? pageCount,
-  }) {
+  static bool isDailyPage(int pdfPage, {int? startPage, int? pageCount}) {
     final effectiveStart = startPage ?? dailyStartPdfPage;
     final effectiveCount = pageCount ?? dailyPageCount;
 

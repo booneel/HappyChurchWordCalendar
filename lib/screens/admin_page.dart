@@ -61,9 +61,7 @@ class _AdminPageState extends State<AdminPage> {
                   Navigator.pop(context);
                   Navigator.push(
                     context,
-                    MaterialPageRoute(
-                      builder: (_) => const AdminQnaPage(),
-                    ),
+                    MaterialPageRoute(builder: (_) => const AdminQnaPage()),
                   );
                 },
                 child: const Text('QnA 답변 작성'),
@@ -75,12 +73,13 @@ class _AdminPageState extends State<AdminPage> {
     });
   }
 
-  Future<void> _signOutAdmin() async {
+  Future<void> _confirmAdminExit() async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('관리자 종료'),
-        content: const Text('관리자 모드를 종료하시겠습니까?'),
+        title: const Center(child: Text('관리자 종료')),
+        content: const Text('관리자 모드를 종료하시겠습니까?', textAlign: TextAlign.center),
+        actionsAlignment: MainAxisAlignment.center,
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -110,7 +109,7 @@ class _AdminPageState extends State<AdminPage> {
         actions: [
           IconButton(
             tooltip: '관리자 종료',
-            onPressed: _signOutAdmin,
+            onPressed: _confirmAdminExit,
             icon: const Icon(Icons.logout),
           ),
         ],
@@ -120,17 +119,12 @@ class _AdminPageState extends State<AdminPage> {
         children: [
           const Text(
             '관리자 기능 선택',
-            style: TextStyle(
-              fontSize: 22,
-              fontWeight: FontWeight.w800,
-            ),
+            style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
           ),
           const SizedBox(height: 4),
           Text(
             'PDF 교체, 날짜 매핑, 말씀 제목 및 QnA 질문/답변을 관리합니다.',
-            style: TextStyle(
-              color: Colors.grey.shade600,
-            ),
+            style: TextStyle(color: Colors.grey.shade600),
           ),
           const SizedBox(height: 18),
           _AdminCard(
@@ -185,9 +179,7 @@ class _AdminPageState extends State<AdminPage> {
                 onTap: () {
                   Navigator.push(
                     context,
-                    MaterialPageRoute(
-                      builder: (_) => const AdminQnaPage(),
-                    ),
+                    MaterialPageRoute(builder: (_) => const AdminQnaPage()),
                   );
                 },
               );
@@ -250,10 +242,7 @@ class _AdminCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Card(
       child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 18,
-          vertical: 8,
-        ),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
         leading: Container(
           padding: const EdgeInsets.all(11),
           decoration: BoxDecoration(
@@ -267,17 +256,12 @@ class _AdminCard extends StatelessWidget {
             Expanded(
               child: Text(
                 title,
-                style: const TextStyle(
-                  fontWeight: FontWeight.w700,
-                ),
+                style: const TextStyle(fontWeight: FontWeight.w700),
               ),
             ),
             if (badgeCount > 0) ...[
               Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 8,
-                  vertical: 3,
-                ),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
                   color: Colors.red,
                   borderRadius: BorderRadius.circular(10),
@@ -303,9 +287,7 @@ class _AdminCard extends StatelessWidget {
             fontWeight: badgeCount > 0 ? FontWeight.w600 : null,
           ),
         ),
-        trailing: const Icon(
-          Icons.chevron_right,
-        ),
+        trailing: const Icon(Icons.chevron_right),
         onTap: onTap,
       ),
     );

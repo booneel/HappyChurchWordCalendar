@@ -199,7 +199,8 @@ class _SettingsPageState extends State<SettingsPage> {
           Card(
             child: ListTile(
               leading: Icon(
-                  adminMode ? Icons.admin_panel_settings : Icons.lock_outline),
+                adminMode ? Icons.admin_panel_settings : Icons.lock_outline,
+              ),
               title: const Text('관리자 모드'),
               subtitle: Text(
                 adminMode ? '현재 활성화됨 (관리자 전용 기능)' : '승인코드로 관리자 기능 사용',
@@ -213,8 +214,10 @@ class _SettingsPageState extends State<SettingsPage> {
             Card(
               child: ListTile(
                 leading: const Icon(Icons.logout, color: Colors.red),
-                title: const Text('관리자 모드 종료',
-                    style: TextStyle(color: Colors.red)),
+                title: const Text(
+                  '관리자 모드 종료',
+                  style: TextStyle(color: Colors.red),
+                ),
                 onTap: _exitAdmin,
               ),
             ),
@@ -224,24 +227,7 @@ class _SettingsPageState extends State<SettingsPage> {
           Card(
             child: Column(
               children: [
-                ListTile(
-                  title: Text('앱 버전'),
-                  trailing: Text('1.0.0'),
-                ),
-                ListTile(
-                  title: Text('현재 PDF'),
-                  trailing: ConstrainedBox(
-                    constraints: BoxConstraints(
-                      maxWidth: MediaQuery.sizeOf(context).width * 0.42,
-                    ),
-                    child: Text(
-                      '365일 매일묵상말씀.pdf',
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      textAlign: TextAlign.end,
-                    ),
-                  ),
-                ),
+                ListTile(title: Text('앱 버전'), trailing: Text('1.0.0')),
               ],
             ),
           ),
@@ -259,8 +245,10 @@ class SectionTitle extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
-      child: Text(text,
-          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+      child: Text(
+        text,
+        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+      ),
     );
   }
 }

@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 import '../services/date_page_mapper.dart';
 import '../services/pdf_catalog_builder_service.dart';
 import '../services/pdf_catalog_service.dart';
+import '../services/pdf_settings_service.dart';
 
 class AdminTitleCatalogPage extends StatefulWidget {
   const AdminTitleCatalogPage({super.key});
@@ -43,6 +44,7 @@ class _AdminTitleCatalogPageState extends State<AdminTitleCatalogPage> {
 
   Future<void> _load() async {
     try {
+      await PdfSettingsService().loadSettings();
       final catalog = await _catalog.getEditableCatalog();
       final confs = await _catalog.getEditableConfidences();
       final catalogYear = await _catalog.getCatalogYear();
@@ -53,6 +55,7 @@ class _AdminTitleCatalogPageState extends State<AdminTitleCatalogPage> {
         titles = catalog;
         confidences = confs;
         year = catalogYear;
+        total = DatePageMapper.dailyPageCount;
         loading = false;
       });
     } catch (e) {
@@ -72,10 +75,10 @@ class _AdminTitleCatalogPageState extends State<AdminTitleCatalogPage> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('365개 제목 비전/레이아웃 전체 분석'),
-        content: const SingleChildScrollView(
+        title: Text('$total개 제목 비전/레이아웃 전체 분석'),
+        content: SingleChildScrollView(
           child: Text(
-            'PDF 전체 365페이지의 레이아웃과 문맥을 한 번 분석합니다.\n\n'
+            'PDF 전체 $total페이지의 레이아웃과 문맥을 한 번 분석합니다.\n\n'
             '상단 날짜 아래 문구의 글꼴, 위치, 관계를 고려하여 제목 전체를 복원합니다.\n\n'
             '완료 후 일반 사용자 앱에서는 전혀 분석을 실행하지 않으며, '
             '확신도가 낮거나 검수가 필요한 항목은 🔴 배지로 강조 표시됩니다.',
@@ -375,9 +378,7 @@ confidence를 넣으면 검수 필요 여부에 반영합니다.'''),
       context: context,
       builder: (_) => AlertDialog(
         title: const Text('오류'),
-        content: SingleChildScrollView(
-          child: SelectableText('$error'),
-        ),
+        content: SingleChildScrollView(child: SelectableText('$error')),
         actions: [
           FilledButton(
             onPressed: () => Navigator.pop(context),
@@ -415,8 +416,9 @@ confidence를 넣으면 검수 필요 여부에 반영합니다.'''),
       );
     });
 
-    final reviewNeededCount =
-        allDays.where((item) => item.isLowConfidence).length;
+    final reviewNeededCount = allDays
+        .where((item) => item.isLowConfidence)
+        .length;
 
     final filteredDays = allDays.where((item) {
       if (filterMode == 'review_needed' && !item.isLowConfidence) {
@@ -448,7 +450,8 @@ confidence를 넣으면 검수 필요 여부에 반영합니다.'''),
           ),
         ],
       ),
-      body: Column(
+      body: ListView(
+        padding: const EdgeInsets.only(bottom: 24),
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
@@ -460,9 +463,9 @@ confidence를 넣으면 검수 필요 여부에 반영합니다.'''),
                   children: [
                     Row(
                       children: [
-                        const Expanded(
+                        Expanded(
                           child: Text(
-                            '365일 제목 검수 관리',
+                            '$total일 제목 검수 관리',
                             style: TextStyle(
                               fontWeight: FontWeight.w800,
                               fontSize: 18,
@@ -524,7 +527,7 @@ confidence를 넣으면 검수 필요 여부에 반영합니다.'''),
                       child: FilledButton.icon(
                         onPressed: building ? null : _buildCatalog,
                         icon: const Icon(Icons.auto_awesome),
-                        label: const Text('PDF 전체 365일 제목 분석 다시 실행'),
+                        label: Text('PDF 전체 $total일 제목 분석 다시 실행'),
                       ),
                     ),
                     if (building) ...[
@@ -619,96 +622,90 @@ confidence를 넣으면 검수 필요 여부에 반영합니다.'''),
               ),
             ),
           ),
-          Expanded(
-            child: filteredDays.isEmpty
-                ? const Center(child: Text('검색 또는 검수 필요 항목이 없습니다.'))
-                : Scrollbar(
-                    thumbVisibility: true,
-                    child: ListView.separated(
-                      physics: const AlwaysScrollableScrollPhysics(),
-                      keyboardDismissBehavior:
-                          ScrollViewKeyboardDismissBehavior.onDrag,
-                      itemCount: filteredDays.length,
-                      separatorBuilder: (_, __) => const Divider(height: 1),
-                      itemBuilder: (context, index) {
-                        final item = filteredDays[index];
-                        final confPercent =
-                            (item.confidence * 100).toStringAsFixed(0);
+          filteredDays.isEmpty
+              ? const Center(child: Text('검색 또는 검수 필요 항목이 없습니다.'))
+              : ListView.separated(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  keyboardDismissBehavior:
+                      ScrollViewKeyboardDismissBehavior.onDrag,
+                  itemCount: filteredDays.length,
+                  separatorBuilder: (_, __) => const Divider(height: 1),
+                  itemBuilder: (context, index) {
+                    final item = filteredDays[index];
+                    final confPercent = (item.confidence * 100).toStringAsFixed(
+                      0,
+                    );
 
-                        return ListTile(
-                          tileColor: item.isLowConfidence
-                              ? Colors.amber.shade50
-                              : null,
-                          leading: SizedBox(
-                            width: 112,
+                    return ListTile(
+                      tileColor: item.isLowConfidence
+                          ? Colors.amber.shade50
+                          : null,
+                      leading: SizedBox(
+                        width: 112,
+                        child: Text(
+                          DateFormat('yyyy년 M월 d일', 'ko_KR').format(item.date),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontWeight: FontWeight.w700,
+                            color: item.isLowConfidence
+                                ? Colors.red.shade800
+                                : null,
+                          ),
+                        ),
+                      ),
+                      title: Row(
+                        children: [
+                          Expanded(
                             child: Text(
-                              DateFormat(
-                                'yyyy년 M월 d일',
-                                'ko_KR',
-                              ).format(item.date),
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
+                              item.title.isNotEmpty
+                                  ? item.title
+                                  : '제목 미입력 (확인 필요)',
                               style: TextStyle(
                                 fontWeight: FontWeight.w700,
-                                color: item.isLowConfidence
-                                    ? Colors.red.shade800
-                                    : null,
+                                color: item.title.isEmpty
+                                    ? Colors.red
+                                    : Colors.black87,
                               ),
                             ),
                           ),
-                          title: Row(
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  item.title.isNotEmpty
-                                      ? item.title
-                                      : '제목 미입력 (확인 필요)',
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.w700,
-                                    color: item.title.isEmpty
-                                        ? Colors.red
-                                        : Colors.black87,
-                                  ),
+                          if (item.title.isNotEmpty) ...[
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: item.isLowConfidence
+                                    ? Colors.amber.shade100
+                                    : Colors.green.shade50,
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(
+                                  color: item.isLowConfidence
+                                      ? Colors.amber.shade400
+                                      : Colors.green.shade300,
                                 ),
                               ),
-                              if (item.title.isNotEmpty) ...[
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 6,
-                                    vertical: 2,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: item.isLowConfidence
-                                        ? Colors.amber.shade100
-                                        : Colors.green.shade50,
-                                    borderRadius: BorderRadius.circular(6),
-                                    border: Border.all(
-                                      color: item.isLowConfidence
-                                          ? Colors.amber.shade400
-                                          : Colors.green.shade300,
-                                    ),
-                                  ),
-                                  child: Text(
-                                    '$confPercent%',
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w700,
-                                      color: item.isLowConfidence
-                                          ? Colors.amber.shade900
-                                          : Colors.green.shade800,
-                                    ),
-                                  ),
+                              child: Text(
+                                '$confPercent%',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                  color: item.isLowConfidence
+                                      ? Colors.amber.shade900
+                                      : Colors.green.shade800,
                                 ),
-                              ],
-                            ],
-                          ),
-                          trailing: const Icon(Icons.edit_outlined),
-                          onTap: () => _editTitle(item.date),
-                        );
-                      },
-                    ),
-                  ),
-          ),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                      trailing: const Icon(Icons.edit_outlined),
+                      onTap: () => _editTitle(item.date),
+                    );
+                  },
+                ),
         ],
       ),
     );

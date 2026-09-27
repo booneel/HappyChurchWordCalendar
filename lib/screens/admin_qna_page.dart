@@ -218,7 +218,7 @@ class _AdminQnaPageState extends State<AdminQnaPage> {
                 Card(
                   margin: EdgeInsets.zero,
                   child: Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
                     child: Row(
                       children: [
                         Icon(
@@ -230,30 +230,35 @@ class _AdminQnaPageState extends State<AdminQnaPage> {
                         Expanded(
                           child: SingleChildScrollView(
                             scrollDirection: Axis.horizontal,
-                            physics: const AlwaysScrollableScrollPhysics(),
-                            child: Row(
-                              children: [
-                                ChoiceChip(
-                                  label: Text('미확인/미답변 ($unreadCount)'),
-                                  selected: _filterMode == 'unread',
-                                  onSelected: (_) =>
-                                      setState(() => _filterMode = 'unread'),
-                                ),
-                                const SizedBox(width: 8),
-                                ChoiceChip(
-                                  label: Text('미답변만 ($unansweredCount)'),
-                                  selected: _filterMode == 'unanswered',
-                                  onSelected: (_) => setState(
-                                      () => _filterMode = 'unanswered'),
-                                ),
-                                const SizedBox(width: 8),
-                                ChoiceChip(
-                                  label: Text('전체 (${items.length})'),
-                                  selected: _filterMode == 'all',
-                                  onSelected: (_) =>
-                                      setState(() => _filterMode = 'all'),
-                                ),
-                              ],
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 2,
+                              ),
+                              child: Row(
+                                children: [
+                                  ChoiceChip(
+                                    label: Text('미확인/미답변 ($unreadCount)'),
+                                    selected: _filterMode == 'unread',
+                                    onSelected: (_) =>
+                                        setState(() => _filterMode = 'unread'),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  ChoiceChip(
+                                    label: Text('미답변만 ($unansweredCount)'),
+                                    selected: _filterMode == 'unanswered',
+                                    onSelected: (_) => setState(
+                                      () => _filterMode = 'unanswered',
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  ChoiceChip(
+                                    label: Text('전체 (${items.length})'),
+                                    selected: _filterMode == 'all',
+                                    onSelected: (_) =>
+                                        setState(() => _filterMode = 'all'),
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
                         ),
@@ -285,40 +290,41 @@ class _AdminQnaPageState extends State<AdminQnaPage> {
                           color: item.isAnswered ? Colors.green : Colors.red,
                           size: 28,
                         ),
-                        title: Row(
-                          children: [
-                            if (!item.isReadByAdmin) ...[
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 6,
-                                  vertical: 2,
-                                ),
-                                margin: const EdgeInsets.only(right: 6),
-                                decoration: BoxDecoration(
-                                  color: Colors.red,
-                                  borderRadius: BorderRadius.circular(6),
-                                ),
-                                child: const Text(
-                                  'NEW',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.w800,
+                        title: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (!item.isReadByAdmin) ...[
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 6,
+                                    vertical: 2,
+                                  ),
+                                  margin: const EdgeInsets.only(right: 6),
+                                  decoration: BoxDecoration(
+                                    color: Colors.red,
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: const Text(
+                                    'NEW',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w800,
+                                    ),
                                   ),
                                 ),
-                              ),
-                            ],
-                            Expanded(
-                              child: Text(
+                              ],
+                              Text(
                                 item.title,
                                 style: const TextStyle(
                                   fontWeight: FontWeight.w800,
                                 ),
                                 maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
                               ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
                         subtitle: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -331,11 +337,13 @@ class _AdminQnaPageState extends State<AdminQnaPage> {
                               style: TextStyle(color: Colors.grey.shade700),
                             ),
                             const SizedBox(height: 6),
-                            Row(
-                              crossAxisAlignment: CrossAxisAlignment.end,
-                              children: [
-                                Expanded(
-                                  child: Text(
+                            SingleChildScrollView(
+                              scrollDirection: Axis.horizontal,
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                crossAxisAlignment: CrossAxisAlignment.end,
+                                children: [
+                                  Text(
                                     '작성자: ${item.authorName} · ${dateFormat.format(item.createdAt)}',
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
@@ -344,10 +352,8 @@ class _AdminQnaPageState extends State<AdminQnaPage> {
                                       color: Colors.grey.shade600,
                                     ),
                                   ),
-                                ),
-                                const SizedBox(width: 8),
-                                Flexible(
-                                  child: Text(
+                                  const SizedBox(width: 8),
+                                  Text(
                                     item.isAnswered ? '답변 완료' : '답변 대기',
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
@@ -360,8 +366,8 @@ class _AdminQnaPageState extends State<AdminQnaPage> {
                                           : Colors.red,
                                     ),
                                   ),
-                                ),
-                              ],
+                                ],
+                              ),
                             ),
                           ],
                         ),
@@ -396,10 +402,9 @@ class _AdminQnaPageState extends State<AdminQnaPage> {
                         ),
                         SizedBox(height: 8),
                         Text(
-                          '앱이 켜져 있지 않을 때도 실시간 기기 푸시 알림을 받으시려면 '
-                          'Firebase Cloud Messaging (FCM) 및 Firebase Cloud Functions를 연결하면 '
-                          '사용자가 질문을 등록하자마자 관리자 기기로 푸시 알림이 전송됩니다.',
-                          style: TextStyle(fontSize: 12.5),
+                          '앱이 꺼져 있어도 새 질문을 받으려면 Firebase Cloud Messaging(FCM)과 '
+                          'Cloud Functions가 연결되어 있어야 합니다. 연결되면 질문 등록 즉시 관리자 기기로 알림을 보냅니다.',
+                          style: TextStyle(fontSize: 12.5, height: 1.45),
                         ),
                       ],
                     ),

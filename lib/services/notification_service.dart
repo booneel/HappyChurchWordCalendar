@@ -11,6 +11,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'backend_config.dart';
 import 'local_profile_service.dart';
 import 'nas_api_client.dart';
+import 'pdf_cache_service.dart';
 
 /// Handles both foreground local notifications and FCM notifications.
 ///
@@ -101,6 +102,9 @@ class NotificationService {
 
     final data = message.data;
     final type = data['type']?.toString() ?? 'general';
+    if (type == 'pdf_update') {
+      await _invalidatePdfCache();
+    }
     final title = message.notification?.title ?? data['title']?.toString();
     final body = message.notification?.body ?? data['body']?.toString();
     if (title == null || body == null || title.isEmpty || body.isEmpty) return;
@@ -244,6 +248,8 @@ class NotificationService {
     if (_pdfVersion == version) return;
     _pdfVersion = version;
 
+    await _invalidatePdfCache();
+
     await _showIfEnabled(
       type: 'pdf_update',
       title: 'PDF가 업데이트되었습니다',
@@ -300,6 +306,7 @@ class NotificationService {
         _pdfVersion = version;
       } else if (_pdfVersion != version) {
         _pdfVersion = version;
+        await _invalidatePdfCache();
         await _showIfEnabled(
           type: 'pdf_update',
           title: 'PDF가 업데이트되었습니다',
@@ -308,6 +315,15 @@ class NotificationService {
       }
     } catch (error) {
       debugPrint('NAS notification polling failed: $error');
+    }
+  }
+
+  Future<void> _invalidatePdfCache() async {
+    try {
+      await PdfCacheService().invalidate();
+    } catch (error, stackTrace) {
+      debugPrint('PDF cache invalidation failed: $error');
+      debugPrintStack(stackTrace: stackTrace);
     }
   }
 

@@ -22,8 +22,9 @@ class _SchedulePageState extends State<SchedulePage> {
 
   DateTime selected = DateTime.now();
   bool titlesLoaded = false;
-  DateTime? _lastTappedDate;
-  DateTime? _lastTappedAt;
+  DateTime? _lastCalendarDate;
+  final GlobalKey _calendarKey = GlobalKey();
+  bool _ignoreCalendarDoubleTap = false;
 
   @override
   void initState() {
@@ -35,59 +36,64 @@ class _SchedulePageState extends State<SchedulePage> {
     });
   }
 
-  Future<void> _openSelected() async {
+  Future<void> _openDate(DateTime date) async {
     late final int page;
     try {
-      page = DatePageMapper.pdfPageForDate(selected);
+      page = DatePageMapper.pdfPageForDate(date);
     } catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('$error')),
-        );
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('$error')));
       }
       return;
     }
 
     // "보기"를 직접 눌렀을 때만 조회수 집계.
-    await history.recordDirectOpen(page: page, date: selected);
+    await history.recordDirectOpen(page: page, date: date);
 
-    final title = catalogService.formatTitleForDate(selected);
+    final title = catalogService.formatTitleForDate(date);
 
     if (!mounted) return;
 
     await Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => PdfPage(
-          title: title,
-          page: page,
-          year: selected.year,
-        ),
+        builder: (_) => PdfPage(title: title, page: page, year: date.year),
       ),
     );
   }
 
-  void _onDateChanged(DateTime value) {
-    final now = DateTime.now();
-    final isDoubleTap =
-        _lastTappedDate != null &&
-        _lastTappedAt != null &&
-        DateUtils.isSameDay(_lastTappedDate, value) &&
-        now.difference(_lastTappedAt!) <= const Duration(milliseconds: 450);
+  Future<void> _openSelected() => _openDate(selected);
 
+  void _onDateChanged(DateTime value) {
+    _lastCalendarDate = value;
     setState(() {
       selected = value;
     });
-    _lastTappedDate = value;
-    _lastTappedAt = now;
+  }
 
-    if (isDoubleTap) {
-      unawaited(_openSelected());
+  void _openLastCalendarDate() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _ignoreCalendarDoubleTap) return;
+      unawaited(_openDate(_lastCalendarDate ?? selected));
+    });
+  }
+
+  void _onCalendarDoubleTapDown(TapDownDetails details) {
+    final renderObject = _calendarKey.currentContext?.findRenderObject();
+    if (renderObject is! RenderBox) {
+      _ignoreCalendarDoubleTap = false;
+      return;
     }
+
+    final localPosition = renderObject.globalToLocal(details.globalPosition);
+    // CalendarDatePicker의 월 이동 헤더와 좌우 화살표 영역은 PDF 열기에서 제외한다.
+    _ignoreCalendarDoubleTap = localPosition.dy <= 80;
   }
 
   @override
   Widget build(BuildContext context) {
+    final selectedPage = DatePageMapper.pdfPageForDateOrNull(selected);
     final selectedTitle = catalogService.formatTitleForDate(selected);
 
     return SafeArea(
@@ -105,8 +111,10 @@ class _SchedulePageState extends State<SchedulePage> {
           ),
           const SizedBox(height: 18),
           GestureDetector(
-            onDoubleTap: () => unawaited(_openSelected()),
+            onDoubleTapDown: _onCalendarDoubleTapDown,
+            onDoubleTap: _openLastCalendarDate,
             child: Card(
+              key: _calendarKey,
               child: CalendarDatePicker(
                 initialDate: selected,
                 firstDate: DateTime(2020),
@@ -120,12 +128,14 @@ class _SchedulePageState extends State<SchedulePage> {
             width: double.infinity,
             height: 52,
             child: FilledButton.icon(
-              onPressed: _openSelected,
+              onPressed: selectedPage == null ? null : _openSelected,
               icon: const Icon(Icons.menu_book_outlined),
               label: Text(
-                titlesLoaded
-                    ? selectedTitle
-                    : '${selected.year}년 ${selected.month}월 ${selected.day}일',
+                selectedPage == null
+                    ? '해당 날짜의 PDF 페이지가 없습니다'
+                    : titlesLoaded
+                        ? selectedTitle
+                        : '${selected.year}년 ${selected.month}월 ${selected.day}일',
                 style: const TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w700,

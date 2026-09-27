@@ -17,7 +17,11 @@ class PdfCacheService {
   static const String _generationKey = 'cached_pdf_generation';
   static const String _lastCheckKey = 'cached_pdf_last_check';
 
-  static const Duration metadataCheckInterval = Duration(hours: 6);
+  // Check the remote file when a new cache load starts. The metadata request
+  // is small, and it prevents a user who missed a push notification from
+  // seeing an old PDF for hours after reopening the app.
+  static const Duration metadataCheckInterval = Duration.zero;
+  static const Duration offlineProbeTimeout = Duration(seconds: 4);
 
   final NasApiClient _nas = NasApiClient.instance;
 
@@ -49,11 +53,7 @@ class PdfCacheService {
     final prefs = await SharedPreferences.getInstance();
 
     if (BackendConfig.useNas) {
-      return _loadFromNas(
-        file: file,
-        prefs: prefs,
-        forceRefresh: forceRefresh,
-      );
+      return _loadFromNas(file: file, prefs: prefs, forceRefresh: forceRefresh);
     }
 
     if (!forceRefresh && await file.exists()) {
@@ -70,7 +70,7 @@ class PdfCacheService {
 
       try {
         final ref = _storage.ref(storagePath);
-        final metadata = await ref.getMetadata();
+        final metadata = await ref.getMetadata().timeout(offlineProbeTimeout);
 
         final remoteGeneration = metadata.generation;
         final localGeneration = prefs.getString(_generationKey);
@@ -87,10 +87,7 @@ class PdfCacheService {
 
         await _download(ref, file);
 
-        await prefs.setString(
-          _generationKey,
-          remoteGeneration,
-        );
+        await prefs.setString(_generationKey, remoteGeneration);
 
         _memoryFile = file;
         return file;
@@ -107,16 +104,10 @@ class PdfCacheService {
     await _download(ref, file);
 
     if (metadata.generation != null) {
-      await prefs.setString(
-        _generationKey,
-        metadata.generation!,
-      );
+      await prefs.setString(_generationKey, metadata.generation!);
     }
 
-    await prefs.setInt(
-      _lastCheckKey,
-      DateTime.now().millisecondsSinceEpoch,
-    );
+    await prefs.setInt(_lastCheckKey, DateTime.now().millisecondsSinceEpoch);
 
     _memoryFile = file;
     return file;
@@ -140,11 +131,13 @@ class PdfCacheService {
     }
 
     try {
-      await _nas.downloadPdf(file);
-      await prefs.setInt(
-        _lastCheckKey,
-        DateTime.now().millisecondsSinceEpoch,
-      );
+      final download = _nas.downloadPdf(file);
+      if (forceRefresh) {
+        await download;
+      } else {
+        await download.timeout(offlineProbeTimeout);
+      }
+      await prefs.setInt(_lastCheckKey, DateTime.now().millisecondsSinceEpoch);
     } catch (_) {
       // NAS가 잠시 끊겨도 기존 캐시가 있으면 앱을 계속 사용할 수 있습니다.
       if (await file.exists()) {
@@ -161,6 +154,19 @@ class PdfCacheService {
     _loading = null;
     _memoryFile = null;
     await getCachedPdf(forceRefresh: true);
+  }
+
+  /// Marks the local copy as stale so the next PDF open checks the server.
+  ///
+  /// The notification callback can run while the app is in the background,
+  /// so invalidating is safer than downloading the PDF from that callback.
+  Future<void> invalidate() async {
+    _loading = null;
+    _memoryFile = null;
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_lastCheckKey);
+    await prefs.remove(_generationKey);
   }
 
   Future<void> _download(Reference ref, File file) async {

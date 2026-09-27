@@ -26,7 +26,10 @@ class PdfPage extends StatefulWidget {
 }
 
 class _PdfPageState extends State<PdfPage> {
-  static const int fallbackTotalPages = 368;
+  // The actual PDF length is applied after the document opens. Keep this
+  // fallback above any supported date mapping so a longer replacement PDF is
+  // not clamped before it can be opened.
+  static const int fallbackTotalPages = 10000;
 
   final PdfCacheService cache = PdfCacheService();
   late int page;
@@ -90,9 +93,8 @@ class _PdfPageState extends State<PdfPage> {
         ),
         actions: [
           IconButton(
-            tooltip: _scrollDirection == Axis.horizontal
-                ? '위아래로 넘기기'
-                : '좌우로 넘기기',
+            tooltip:
+                _scrollDirection == Axis.horizontal ? '위아래로 넘기기' : '좌우로 넘기기',
             onPressed: () {
               setState(() {
                 _scrollDirection = _scrollDirection == Axis.horizontal

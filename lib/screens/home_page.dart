@@ -105,6 +105,15 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _openPdf({required int page, required DateTime date}) async {
+    if (!DatePageMapper.isDailyPage(page)) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('해당 날짜에 연결된 PDF 페이지가 없습니다.')),
+        );
+      }
+      return;
+    }
+
     // 직접 눌러서 들어간 경우에만 조회수 +1.
     await history.recordDirectOpen(page: page, date: date);
 
@@ -115,11 +124,7 @@ class _HomePageState extends State<HomePage> {
     await Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => PdfPage(
-          title: title,
-          page: page,
-          year: date.year,
-        ),
+        builder: (_) => PdfPage(title: title, page: page, year: date.year),
       ),
     );
 
@@ -130,10 +135,12 @@ class _HomePageState extends State<HomePage> {
   @override
   Widget build(BuildContext context) {
     final today = DateTime.now();
-    final todayPage = DatePageMapper.pdfPageForDate(today);
-    final todayTitle = _titlesLoaded
-        ? catalogService.formatTitleForDate(today)
-        : '${today.year}년 ${today.month}월 ${today.day}일';
+    final todayPage = DatePageMapper.pdfPageForDateOrNull(today);
+    final todayTitle = todayPage == null
+        ? '오늘 날짜에 PDF 페이지가 없습니다'
+        : _titlesLoaded
+            ? catalogService.formatTitleForDate(today)
+            : '${today.year}년 ${today.month}월 ${today.day}일';
     final todayDateText = DateFormat('yyyy년 M월 d일 (E)', 'ko_KR').format(today);
 
     return SafeArea(
@@ -144,9 +151,24 @@ class _HomePageState extends State<HomePage> {
           builder: (context, snapshot) {
             final data = snapshot.data;
 
-            DateTime dateForPage(int page) {
-              return DatePageMapper.dateForPdfPage(page, year: today.year);
+            DateTime? dateForPage(int page) {
+              try {
+                return DatePageMapper.dateForPdfPage(page, year: today.year);
+              } catch (_) {
+                return null;
+              }
             }
+
+            final topPages = data == null
+                ? <PageViewStat>[]
+                : data.topPages
+                    .where((item) => dateForPage(item.page) != null)
+                    .toList();
+            final recentItems = data == null
+                ? <RecentDirectOpen>[]
+                : data.recent
+                    .where((item) => dateForPage(item.page) != null)
+                    .toList();
 
             return ListView(
               padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
@@ -189,7 +211,9 @@ class _HomePageState extends State<HomePage> {
                 Card(
                   child: InkWell(
                     borderRadius: BorderRadius.circular(20),
-                    onTap: () => _openPdf(page: todayPage, date: today),
+                    onTap: todayPage == null
+                        ? null
+                        : () => _openPdf(page: todayPage, date: today),
                     child: Padding(
                       padding: const EdgeInsets.all(20),
                       child: Column(
@@ -236,10 +260,14 @@ class _HomePageState extends State<HomePage> {
                           SizedBox(
                             width: double.infinity,
                             child: FilledButton.icon(
-                              onPressed: () =>
-                                  _openPdf(page: todayPage, date: today),
+                              onPressed: todayPage == null
+                                  ? null
+                                  : () =>
+                                      _openPdf(page: todayPage, date: today),
                               icon: const Icon(Icons.menu_book_outlined),
-                              label: const Text('오늘 말씀 보기'),
+                              label: Text(
+                                todayPage == null ? '오늘 말씀 PDF 없음' : '오늘 말씀 보기',
+                              ),
                             ),
                           ),
                         ],
@@ -264,7 +292,7 @@ class _HomePageState extends State<HomePage> {
                       child: CircularProgressIndicator(),
                     ),
                   )
-                else if (data?.topPages.isEmpty ?? true)
+                else if (topPages.isEmpty)
                   const Card(
                     child: Padding(
                       padding: EdgeInsets.all(18),
@@ -275,16 +303,16 @@ class _HomePageState extends State<HomePage> {
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      for (int i = 0; i < data!.topPages.length; i++) ...[
+                      for (int i = 0; i < topPages.length; i++) ...[
                         if (i > 0) const SizedBox(width: 10),
                         Expanded(
                           child: _TopWordCard(
                             rank: ['🥇', '🥈', '🥉'][i],
-                            date: dateForPage(data.topPages[i].page),
-                            views: data.topPages[i].views,
+                            date: dateForPage(topPages[i].page)!,
+                            views: topPages[i].views,
                             onTap: () => _openPdf(
-                              page: data.topPages[i].page,
-                              date: dateForPage(data.topPages[i].page),
+                              page: topPages[i].page,
+                              date: dateForPage(topPages[i].page)!,
                             ),
                           ),
                         ),
@@ -321,7 +349,7 @@ class _HomePageState extends State<HomePage> {
                   ],
                 ),
                 const SizedBox(height: 8),
-                if (data?.recent.isEmpty ?? true)
+                if (recentItems.isEmpty)
                   const Card(
                     child: Padding(
                       padding: EdgeInsets.all(18),
@@ -332,7 +360,7 @@ class _HomePageState extends State<HomePage> {
                   Card(
                     child: Column(
                       children: [
-                        for (final item in data!.recent)
+                        for (final item in recentItems)
                           _RecentWordRow(
                             date: item.date,
                             onTap: () =>
@@ -352,15 +380,20 @@ class _HomePageState extends State<HomePage> {
 
 class _TodayPdfPreview extends StatelessWidget {
   final Future<File> pdfFuture;
-  final int page;
+  final int? page;
 
-  const _TodayPdfPreview({
-    required this.pdfFuture,
-    required this.page,
-  });
+  const _TodayPdfPreview({required this.pdfFuture, required this.page});
 
   @override
   Widget build(BuildContext context) {
+    if (page == null) {
+      return _previewFrame(
+        const Center(
+          child: Text('오늘 날짜에 연결된 PDF 페이지가 없습니다.', textAlign: TextAlign.center),
+        ),
+      );
+    }
+
     return FutureBuilder<File>(
       future: pdfFuture,
       builder: (context, snapshot) {
@@ -388,7 +421,7 @@ class _TodayPdfPreview extends StatelessWidget {
             child: IgnorePointer(
               child: pdfrx.PdfViewer.file(
                 snapshot.data!.path,
-                initialPageNumber: page,
+                initialPageNumber: page!,
                 params: const pdfrx.PdfViewerParams(
                   pageAnchor: pdfrx.PdfPageAnchor.top,
                 ),
