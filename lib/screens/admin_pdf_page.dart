@@ -221,7 +221,12 @@ class _AdminPdfPageState extends State<AdminPdfPage> {
 
     try {
       if (BackendConfig.useNas) {
-        await _nas.uploadPdf(fileToUpload, fileName: _pickedFile!.name);
+        final uploaded = await _nas.uploadPdf(
+          fileToUpload,
+          fileName: _pickedFile!.name,
+        );
+        _currentFileName =
+            uploaded['fileName']?.toString() ?? _pickedFile!.name;
         await _cacheService.refresh();
 
         if (!mounted) return;
@@ -647,18 +652,21 @@ class _AdminPdfPageState extends State<AdminPdfPage> {
                 // 안내 상자
                 Card(
                   color: Theme.of(context).colorScheme.primaryContainer,
-                  child: const Padding(
-                    padding: EdgeInsets.all(16),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Icon(Icons.info_outline),
-                        SizedBox(width: 12),
+                        const Icon(Icons.info_outline),
+                        const SizedBox(width: 12),
                         Expanded(
                           child: Text(
-                            'PDF를 교체하면 서버에 새 파일이 저장되고 사용자에게 업데이트 알림이 전송됩니다. '
-                            '사용자 앱은 알림을 받거나 다시 실행할 때 새 PDF를 확인하며, 인터넷이 없으면 저장된 PDF를 계속 보여줍니다.',
-                            style: TextStyle(fontSize: 13, height: 1.45),
+                            BackendConfig.useNas
+                                ? 'PDF 교체 후 실행 중인 사용자 앱은 약 30초 간격으로 변경을 확인합니다. '
+                                    '앱이 완전히 종료된 경우 즉시 푸시 알림은 지원하지 않습니다.'
+                                : 'PDF를 교체하면 서버에 새 파일이 저장되고 사용자에게 업데이트 알림이 전송됩니다. '
+                                    '사용자 앱은 알림을 받거나 다시 실행할 때 새 PDF를 확인하며, 인터넷이 없으면 저장된 PDF를 계속 보여줍니다.',
+                            style: const TextStyle(fontSize: 13, height: 1.45),
                           ),
                         ),
                       ],

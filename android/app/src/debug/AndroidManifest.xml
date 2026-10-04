@@ -4,4 +4,6 @@
          to allow setting breakpoints, to provide hot reload, etc.
     -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Allows a localhost HTTP API through adb reverse during emulator testing only. -->
+    <application android:usesCleartextTraffic="true" />
 </manifest>

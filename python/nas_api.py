@@ -15,7 +15,8 @@ import shutil
 import sqlite3
 import tempfile
 import threading
-from contextlib import contextmanager
+import hashlib
+from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,7 @@ from typing import Any
 from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
+from pypdf import PdfReader
 
 
 def utc_now() -> str:
@@ -33,6 +35,7 @@ ROOT = Path(os.getenv("DATEPDF_NAS_ROOT", "./nas-data")).resolve()
 DATA = ROOT / "data"
 BACKUPS = ROOT / "backups"
 TOKEN = os.getenv("DATEPDF_NAS_TOKEN", "").strip()
+ADMIN_TOKEN = os.getenv("DATEPDF_NAS_ADMIN_TOKEN", "").strip()
 PDF = DATA / "current.pdf"
 CATALOG = DATA / "catalog.json"
 SETTINGS = DATA / "settings.json"
@@ -42,7 +45,15 @@ DATABASE = DATA / "datepdf.sqlite3"
 PDF_META = DATA / "pdf_metadata.json"
 WRITE_LOCK = threading.RLock()
 
-app = FastAPI(title="DatePDF NAS API", version="1.0.0")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    if len(TOKEN) < 32 or len(ADMIN_TOKEN) < 32 or TOKEN == ADMIN_TOKEN:
+        raise RuntimeError("Set distinct DATEPDF_NAS_TOKEN and DATEPDF_NAS_ADMIN_TOKEN (at least 32 characters each)")
+    ensure_store()
+    yield
+
+
+app = FastAPI(title="DatePDF NAS API", version="1.0.0", lifespan=lifespan)
 
 
 class CatalogPayload(BaseModel):
@@ -59,6 +70,7 @@ class CatalogPayload(BaseModel):
 class SettingsPayload(BaseModel):
     dailyStartPdfPage: int = 4
     dailyPageCount: int = 365
+    pdfPageCount: int = 368
     pdfFileName: str = "365일 매일묵상말씀.pdf"
     updatedAt: str | None = None
 
@@ -72,8 +84,8 @@ class ViewPayload(BaseModel):
 
 class QuestionPayload(BaseModel):
     id: str | None = None
-    title: str = ""
-    content: str = ""
+    title: str = Field(min_length=1, max_length=200)
+    content: str = Field(min_length=1, max_length=5000)
     authorName: str = "사용자"
     authorDeviceId: str | None = None
     notificationToken: str | None = None
@@ -202,22 +214,29 @@ def atomic_json(path: Path, value: Any, backup: bool = False) -> None:
 
 
 def require_auth(authorization: str | None = Header(default=None)) -> None:
-    if not TOKEN:
-        return
     expected = f"Bearer {TOKEN}"
     if not authorization or not secrets.compare_digest(authorization, expected):
         raise HTTPException(status_code=401, detail="Bearer token required")
 
 
+def require_admin(authorization: str | None = Header(default=None)) -> None:
+    expected = f"Bearer {ADMIN_TOKEN}"
+    if not authorization or not secrets.compare_digest(authorization, expected):
+        raise HTTPException(status_code=403, detail="Administrator token required")
+
+
 def backup_pdf() -> None:
     if PDF.exists():
-        backup = BACKUPS / f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-current.pdf"
+        backup = BACKUPS / f"{datetime.now().strftime('%Y%m%d-%H%M%S-%f')}-current.pdf"
         shutil.copy2(PDF, backup)
 
 
-@app.on_event("startup")
-def startup() -> None:
-    ensure_store()
+
+
+
+@app.get("/api/admin/check", dependencies=[Depends(require_admin)])
+def admin_check() -> dict[str, bool]:
+    return {"ok": True}
 
 
 @app.get("/api/pdf/current", dependencies=[Depends(require_auth)])
@@ -248,18 +267,30 @@ def pdf_metadata() -> dict[str, Any]:
     }
 
 
-@app.post("/api/pdf/current", dependencies=[Depends(require_auth)])
+@app.post("/api/pdf/current", dependencies=[Depends(require_admin)])
 async def upload_pdf(file: UploadFile = File(...)) -> dict[str, Any]:
     DATA.mkdir(parents=True, exist_ok=True)
     temporary = DATA / f".upload-{secrets.token_hex(8)}.pdf"
     try:
+        size = 0
         with temporary.open("wb") as target:
             while chunk := await file.read(1024 * 1024):
+                size += len(chunk)
+                if size > 100 * 1024 * 1024:
+                    raise HTTPException(status_code=413, detail="PDF exceeds 100 MiB")
                 target.write(chunk)
             target.flush()
             os.fsync(target.fileno())
-        if temporary.stat().st_size == 0:
-            raise HTTPException(status_code=400, detail="PDF is empty")
+        try:
+            with temporary.open("rb") as source:
+                if source.read(5) != b"%PDF-":
+                    raise ValueError("missing PDF header")
+                source.seek(0)
+                page_count = len(PdfReader(source, strict=False).pages)
+            if page_count < 1:
+                raise ValueError("PDF has no pages")
+        except Exception as error:
+            raise HTTPException(status_code=400, detail="Invalid PDF") from error
         with WRITE_LOCK:
             backup_pdf()
             os.replace(temporary, PDF)
@@ -268,6 +299,8 @@ async def upload_pdf(file: UploadFile = File(...)) -> dict[str, Any]:
                 {
                     "fileName": Path(file.filename or "current.pdf").name,
                     "updatedAt": utc_now(),
+                    "pageCount": page_count,
+                    "sha256": hashlib.sha256(PDF.read_bytes()).hexdigest(),
                 },
             )
         return pdf_metadata()
@@ -280,7 +313,7 @@ def get_catalog() -> dict[str, Any]:
     return read_json(CATALOG, CatalogPayload().model_dump())
 
 
-@app.put("/api/catalog/current", dependencies=[Depends(require_auth)])
+@app.put("/api/catalog/current", dependencies=[Depends(require_admin)])
 def put_catalog(payload: CatalogPayload) -> dict[str, Any]:
     data = payload.model_dump()
     data["updatedAt"] = payload.updatedAt or utc_now()
@@ -342,7 +375,7 @@ def get_settings() -> dict[str, Any]:
     return read_json(SETTINGS, SettingsPayload().model_dump())
 
 
-@app.put("/api/settings/pdf", dependencies=[Depends(require_auth)])
+@app.put("/api/settings/pdf", dependencies=[Depends(require_admin)])
 def put_settings(payload: SettingsPayload) -> dict[str, Any]:
     data = payload.model_dump()
     data["updatedAt"] = payload.updatedAt or utc_now()
@@ -370,17 +403,18 @@ def get_qna() -> dict[str, Any]:
 @app.post("/api/qna", dependencies=[Depends(require_auth)])
 def create_qna(payload: QuestionPayload) -> dict[str, Any]:
     item = payload.model_dump()
+    item["answer"] = None
+    item["answeredAt"] = None
+    item["isAnswered"] = False
+    item["isReadByAdmin"] = False
     item["id"] = item["id"] or secrets.token_urlsafe(12)
     item["createdAt"] = item["createdAt"] or utc_now()
     with database() as connection:
         with connection:
             connection.execute(
                 """
-                INSERT INTO qna(id, payload, created_at)
+                INSERT OR IGNORE INTO qna(id, payload, created_at)
                 VALUES (?, ?, ?)
-                ON CONFLICT(id) DO UPDATE SET
-                    payload = excluded.payload,
-                    created_at = excluded.created_at
                 """,
                 (
                     item["id"],
@@ -388,11 +422,17 @@ def create_qna(payload: QuestionPayload) -> dict[str, Any]:
                     str(item["createdAt"]),
                 ),
             )
-    return item
+            row = connection.execute("SELECT payload FROM qna WHERE id = ?", (item["id"],)).fetchone()
+    return json.loads(row["payload"])
 
 
-@app.put("/api/qna/{question_id}", dependencies=[Depends(require_auth)])
+@app.put("/api/qna/{question_id}", dependencies=[Depends(require_admin)])
 def update_qna(question_id: str, updates: dict[str, Any]) -> dict[str, Any]:
+    allowed = {"answer", "answeredAt", "isAnswered", "isReadByAdmin"}
+    if not updates or set(updates) - allowed:
+        raise HTTPException(status_code=400, detail="Unsupported QnA update")
+    if "answer" in updates and (not isinstance(updates["answer"], str) or len(updates["answer"]) > 5000):
+        raise HTTPException(status_code=400, detail="Invalid answer")
     with database() as connection:
         with connection:
             row = connection.execute(

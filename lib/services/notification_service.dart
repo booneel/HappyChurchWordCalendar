@@ -38,6 +38,7 @@ class NotificationService {
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _qnaSubscription;
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _pdfSubscription;
   Timer? _nasTimer;
+  bool _nasPolling = false;
 
   String? _deviceId;
   String? _fcmToken;
@@ -265,7 +266,10 @@ class NotificationService {
   }
 
   Future<void> _pollNas() async {
+    if (_nasPolling) return;
+    _nasPolling = true;
     try {
+      final prefs = await SharedPreferences.getInstance();
       final qnaData = await _nas.getJson('/api/qna');
       final rawItems = qnaData['items'];
       if (rawItems is List) {
@@ -276,7 +280,10 @@ class NotificationService {
         if (!_qnaLoaded) {
           for (final item in snapshot) {
             final id = item['id']?.toString();
-            if (id != null) _qnaAnswers[id] = item['isAnswered'] == true;
+            if (id != null) {
+              _qnaAnswers[id] =
+                  prefs.getBool('nas_qna_answer_$id') ?? (item['isAnswered'] == true);
+            }
           }
           _qnaLoaded = true;
         } else {
@@ -296,15 +303,17 @@ class NotificationService {
               );
             }
             _qnaAnswers[id] = answered;
+            if (belongsToThisDevice) {
+              await prefs.setBool('nas_qna_answer_$id', answered);
+            }
           }
         }
       }
 
       final pdf = await _nas.getJson('/api/pdf/current/metadata');
       final version = '${pdf['updatedAt'] ?? ''}|${pdf['fileSize'] ?? ''}';
-      if (_pdfVersion == null) {
-        _pdfVersion = version;
-      } else if (_pdfVersion != version) {
+      _pdfVersion ??= prefs.getString('nas_pdf_version') ?? version;
+      if (_pdfVersion != version) {
         _pdfVersion = version;
         await _invalidatePdfCache();
         await _showIfEnabled(
@@ -313,8 +322,11 @@ class NotificationService {
           body: '새로운 말씀 PDF를 확인해 보세요.',
         );
       }
+      await prefs.setString('nas_pdf_version', version);
     } catch (error) {
       debugPrint('NAS notification polling failed: $error');
+    } finally {
+      _nasPolling = false;
     }
   }
 
