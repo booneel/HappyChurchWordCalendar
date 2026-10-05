@@ -15,7 +15,9 @@ import shutil
 import sqlite3
 import tempfile
 import threading
-from contextlib import contextmanager
+import hashlib
+import httpx
+from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -23,6 +25,7 @@ from typing import Any
 from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
+from pypdf import PdfReader
 
 
 def utc_now() -> str:
@@ -33,6 +36,9 @@ ROOT = Path(os.getenv("DATEPDF_NAS_ROOT", "./nas-data")).resolve()
 DATA = ROOT / "data"
 BACKUPS = ROOT / "backups"
 TOKEN = os.getenv("DATEPDF_NAS_TOKEN", "").strip()
+ADMIN_TOKEN = os.getenv("DATEPDF_NAS_ADMIN_TOKEN", "").strip()
+PUSH_RELAY_URL = os.getenv("DATEPDF_NAS_PUSH_URL", "").strip()
+PUSH_RELAY_SECRET = os.getenv("DATEPDF_NAS_PUSH_SECRET", "").strip()
 PDF = DATA / "current.pdf"
 CATALOG = DATA / "catalog.json"
 SETTINGS = DATA / "settings.json"
@@ -42,7 +48,32 @@ DATABASE = DATA / "datepdf.sqlite3"
 PDF_META = DATA / "pdf_metadata.json"
 WRITE_LOCK = threading.RLock()
 
-app = FastAPI(title="DatePDF NAS API", version="1.0.0")
+
+async def notify_nas_push(event: dict[str, Any]) -> None:
+    """Relay NAS changes through the Firebase project to FCM devices, if set up."""
+    if not PUSH_RELAY_URL or not PUSH_RELAY_SECRET:
+        return
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.post(
+                PUSH_RELAY_URL,
+                headers={"Authorization": f"Bearer {PUSH_RELAY_SECRET}"},
+                json=event,
+            )
+            response.raise_for_status()
+    except Exception as error:
+        # A push relay outage must not roll back a successful NAS write.
+        print(f"NAS push relay failed: {type(error).__name__}", flush=True)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    if len(TOKEN) < 32 or len(ADMIN_TOKEN) < 32 or TOKEN == ADMIN_TOKEN:
+        raise RuntimeError("Set distinct DATEPDF_NAS_TOKEN and DATEPDF_NAS_ADMIN_TOKEN (at least 32 characters each)")
+    ensure_store()
+    yield
+
+
+app = FastAPI(title="DatePDF NAS API", version="1.0.0", lifespan=lifespan)
 
 
 class CatalogPayload(BaseModel):
@@ -59,6 +90,7 @@ class CatalogPayload(BaseModel):
 class SettingsPayload(BaseModel):
     dailyStartPdfPage: int = 4
     dailyPageCount: int = 365
+    pdfPageCount: int = 368
     pdfFileName: str = "365일 매일묵상말씀.pdf"
     updatedAt: str | None = None
 
@@ -72,8 +104,8 @@ class ViewPayload(BaseModel):
 
 class QuestionPayload(BaseModel):
     id: str | None = None
-    title: str = ""
-    content: str = ""
+    title: str = Field(min_length=1, max_length=200)
+    content: str = Field(min_length=1, max_length=5000)
     authorName: str = "사용자"
     authorDeviceId: str | None = None
     notificationToken: str | None = None
@@ -186,8 +218,9 @@ def atomic_json(path: Path, value: Any, backup: bool = False) -> None:
     BACKUPS.mkdir(parents=True, exist_ok=True)
     with WRITE_LOCK:
         if backup and path.exists():
-            backup_path = BACKUPS / f"{path.stem}-{datetime.now().strftime('%Y%m%d-%H%M%S')}.json"
+            backup_path = BACKUPS / f"{path.stem}-{datetime.now().strftime('%Y%m%d-%H%M%S-%f')}.json"
             shutil.copy2(path, backup_path)
+            prune_backups(f"{path.stem}-*.json", keep=30)
         fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
@@ -202,22 +235,36 @@ def atomic_json(path: Path, value: Any, backup: bool = False) -> None:
 
 
 def require_auth(authorization: str | None = Header(default=None)) -> None:
-    if not TOKEN:
-        return
     expected = f"Bearer {TOKEN}"
     if not authorization or not secrets.compare_digest(authorization, expected):
         raise HTTPException(status_code=401, detail="Bearer token required")
 
 
+def require_admin(authorization: str | None = Header(default=None)) -> None:
+    expected = f"Bearer {ADMIN_TOKEN}"
+    if not authorization or not secrets.compare_digest(authorization, expected):
+        raise HTTPException(status_code=403, detail="Administrator token required")
+
+
 def backup_pdf() -> None:
     if PDF.exists():
-        backup = BACKUPS / f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-current.pdf"
+        backup = BACKUPS / f"{datetime.now().strftime('%Y%m%d-%H%M%S-%f')}-current.pdf"
         shutil.copy2(PDF, backup)
 
 
-@app.on_event("startup")
-def startup() -> None:
-    ensure_store()
+def prune_backups(pattern: str, *, keep: int) -> None:
+    """Bound same-volume rollback copies; Hyper Backup remains the long-term copy."""
+    paths = sorted(BACKUPS.glob(pattern), key=lambda path: path.stat().st_mtime, reverse=True)
+    for old_path in paths[keep:]:
+        old_path.unlink(missing_ok=True)
+
+
+
+
+
+@app.get("/api/admin/check", dependencies=[Depends(require_admin)])
+def admin_check() -> dict[str, bool]:
+    return {"ok": True}
 
 
 @app.get("/api/pdf/current", dependencies=[Depends(require_auth)])
@@ -238,9 +285,12 @@ def pdf_metadata() -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="current.pdf not found")
     stat = PDF.stat()
     metadata = read_json(PDF_META, {})
+    page_count = metadata.get("pageCount")
     return {
         "fileName": metadata.get("fileName") or PDF.name,
         "fileSize": stat.st_size,
+        "pageCount": page_count,
+        "pdfPageCount": page_count,
         "updatedAt": metadata.get("updatedAt")
         or datetime.fromtimestamp(stat.st_mtime, timezone.utc)
         .isoformat()
@@ -248,18 +298,30 @@ def pdf_metadata() -> dict[str, Any]:
     }
 
 
-@app.post("/api/pdf/current", dependencies=[Depends(require_auth)])
+@app.post("/api/pdf/current", dependencies=[Depends(require_admin)])
 async def upload_pdf(file: UploadFile = File(...)) -> dict[str, Any]:
     DATA.mkdir(parents=True, exist_ok=True)
     temporary = DATA / f".upload-{secrets.token_hex(8)}.pdf"
     try:
+        size = 0
         with temporary.open("wb") as target:
             while chunk := await file.read(1024 * 1024):
+                size += len(chunk)
+                if size > 100 * 1024 * 1024:
+                    raise HTTPException(status_code=413, detail="PDF exceeds 100 MiB")
                 target.write(chunk)
             target.flush()
             os.fsync(target.fileno())
-        if temporary.stat().st_size == 0:
-            raise HTTPException(status_code=400, detail="PDF is empty")
+        try:
+            with temporary.open("rb") as source:
+                if source.read(5) != b"%PDF-":
+                    raise ValueError("missing PDF header")
+                source.seek(0)
+                page_count = len(PdfReader(source, strict=False).pages)
+            if page_count < 1:
+                raise ValueError("PDF has no pages")
+        except Exception as error:
+            raise HTTPException(status_code=400, detail="Invalid PDF") from error
         with WRITE_LOCK:
             backup_pdf()
             os.replace(temporary, PDF)
@@ -268,8 +330,11 @@ async def upload_pdf(file: UploadFile = File(...)) -> dict[str, Any]:
                 {
                     "fileName": Path(file.filename or "current.pdf").name,
                     "updatedAt": utc_now(),
+                    "pageCount": page_count,
+                    "sha256": hashlib.sha256(PDF.read_bytes()).hexdigest(),
                 },
             )
+        await notify_nas_push({"type": "pdf_update"})
         return pdf_metadata()
     finally:
         temporary.unlink(missing_ok=True)
@@ -280,7 +345,7 @@ def get_catalog() -> dict[str, Any]:
     return read_json(CATALOG, CatalogPayload().model_dump())
 
 
-@app.put("/api/catalog/current", dependencies=[Depends(require_auth)])
+@app.put("/api/catalog/current", dependencies=[Depends(require_admin)])
 def put_catalog(payload: CatalogPayload) -> dict[str, Any]:
     data = payload.model_dump()
     data["updatedAt"] = payload.updatedAt or utc_now()
@@ -342,7 +407,7 @@ def get_settings() -> dict[str, Any]:
     return read_json(SETTINGS, SettingsPayload().model_dump())
 
 
-@app.put("/api/settings/pdf", dependencies=[Depends(require_auth)])
+@app.put("/api/settings/pdf", dependencies=[Depends(require_admin)])
 def put_settings(payload: SettingsPayload) -> dict[str, Any]:
     data = payload.model_dump()
     data["updatedAt"] = payload.updatedAt or utc_now()
@@ -352,6 +417,15 @@ def put_settings(payload: SettingsPayload) -> dict[str, Any]:
 
 @app.get("/api/qna", dependencies=[Depends(require_auth)])
 def get_qna() -> dict[str, Any]:
+    return _read_qna_items(include_author=False)
+
+
+@app.get("/api/admin/qna", dependencies=[Depends(require_admin)])
+def get_admin_qna() -> dict[str, Any]:
+    return _read_qna_items(include_author=True)
+
+
+def _read_qna_items(*, include_author: bool) -> dict[str, Any]:
     with database() as connection:
         rows = connection.execute(
             "SELECT payload FROM qna ORDER BY created_at DESC LIMIT 50"
@@ -363,6 +437,11 @@ def get_qna() -> dict[str, Any]:
         except json.JSONDecodeError:
             continue
         if isinstance(item, dict):
+            item.pop("notificationToken", None)
+            if not include_author:
+                item.pop("authorName", None)
+                # Keep the opaque device ID for answer-notification targeting.
+                item.pop("isReadByAdmin", None)
             items.append(item)
     return {"items": items}
 
@@ -370,17 +449,19 @@ def get_qna() -> dict[str, Any]:
 @app.post("/api/qna", dependencies=[Depends(require_auth)])
 def create_qna(payload: QuestionPayload) -> dict[str, Any]:
     item = payload.model_dump()
+    item["answer"] = None
+    item["answeredAt"] = None
+    item["isAnswered"] = False
+    item["isReadByAdmin"] = False
+    item["notificationToken"] = None
     item["id"] = item["id"] or secrets.token_urlsafe(12)
     item["createdAt"] = item["createdAt"] or utc_now()
     with database() as connection:
         with connection:
             connection.execute(
                 """
-                INSERT INTO qna(id, payload, created_at)
+                INSERT OR IGNORE INTO qna(id, payload, created_at)
                 VALUES (?, ?, ?)
-                ON CONFLICT(id) DO UPDATE SET
-                    payload = excluded.payload,
-                    created_at = excluded.created_at
                 """,
                 (
                     item["id"],
@@ -388,11 +469,19 @@ def create_qna(payload: QuestionPayload) -> dict[str, Any]:
                     str(item["createdAt"]),
                 ),
             )
-    return item
+            row = connection.execute("SELECT payload FROM qna WHERE id = ?", (item["id"],)).fetchone()
+    return json.loads(row["payload"])
 
 
-@app.put("/api/qna/{question_id}", dependencies=[Depends(require_auth)])
-def update_qna(question_id: str, updates: dict[str, Any]) -> dict[str, Any]:
+@app.put("/api/qna/{question_id}", dependencies=[Depends(require_admin)])
+async def update_qna(question_id: str, updates: dict[str, Any]) -> dict[str, Any]:
+    allowed = {"answer", "answeredAt", "isAnswered", "isReadByAdmin"}
+    if not updates or set(updates) - allowed:
+        raise HTTPException(status_code=400, detail="Unsupported QnA update")
+    if "answer" in updates and (not isinstance(updates["answer"], str) or len(updates["answer"]) > 5000):
+        raise HTTPException(status_code=400, detail="Invalid answer")
+    updated_item = None
+    was_answered = False
     with database() as connection:
         with connection:
             row = connection.execute(
@@ -401,6 +490,7 @@ def update_qna(question_id: str, updates: dict[str, Any]) -> dict[str, Any]:
             ).fetchone()
             if row is not None:
                 item = json.loads(row["payload"])
+                was_answered = item.get("isAnswered") is True
                 item.update(updates)
                 connection.execute(
                     """
@@ -414,8 +504,30 @@ def update_qna(question_id: str, updates: dict[str, Any]) -> dict[str, Any]:
                         question_id,
                     ),
                 )
-                return item
-    raise HTTPException(status_code=404, detail="question not found")
+                updated_item = item
+    if updated_item is None:
+        raise HTTPException(status_code=404, detail="question not found")
+    if not was_answered and updated_item.get("isAnswered") is True:
+        await notify_nas_push({
+            "type": "qna_answer",
+            "deviceId": updated_item.get("authorDeviceId"),
+            "questionId": question_id,
+            "answer": updated_item.get("answer") or "",
+        })
+    return updated_item
+
+
+@app.delete("/api/qna/{question_id}", dependencies=[Depends(require_admin)])
+def delete_qna(question_id: str) -> dict[str, bool]:
+    with database() as connection:
+        with connection:
+            result = connection.execute(
+                "DELETE FROM qna WHERE id = ?",
+                (question_id,),
+            )
+    if result.rowcount == 0:
+        raise HTTPException(status_code=404, detail="question not found")
+    return {"ok": True}
 
 
 if __name__ == "__main__":

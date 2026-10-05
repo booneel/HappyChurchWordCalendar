@@ -3,7 +3,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../services/backend_config.dart';
 import '../services/local_profile_service.dart';
+import '../services/nas_api_client.dart';
 import '../services/pdf_cache_service.dart';
 import '../services/pdf_catalog_service.dart';
 import '../services/pdf_settings_service.dart';
@@ -97,7 +99,50 @@ class _AppShellState extends State<AppShell> {
     ];
 
     return Scaffold(
-      body: pages[index],
+      body: Column(
+        children: [
+          if (BackendConfig.useNas)
+            ValueListenableBuilder<bool?>(
+              valueListenable: NasApiClient.serverReachability,
+              builder: (context, reachable, _) {
+                if (reachable != false) return const SizedBox.shrink();
+                return Material(
+                  color: Theme.of(context).colorScheme.errorContainer,
+                  child: SafeArea(
+                    bottom: false,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 9,
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.cloud_off_outlined,
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onErrorContainer),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              'NAS 오프라인: 저장된 PDF와 Q&A를 읽기 전용으로 표시합니다. 질문과 답변은 연결 후 이용할 수 있습니다.',
+                              style: TextStyle(
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onErrorContainer,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          Expanded(child: pages[index]),
+        ],
+      ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: index,
         onDestinationSelected: (value) {

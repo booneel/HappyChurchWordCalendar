@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../services/admin_service.dart';
+import '../services/backend_config.dart';
 
 class AdminCodePage extends StatefulWidget {
   const AdminCodePage({super.key});
@@ -26,11 +27,20 @@ class _AdminCodePageState extends State<AdminCodePage> {
     final code = _codeController.text.trim();
 
     if (code.isEmpty) {
-      setState(() => _errorMessage = '6자리 승인코드를 입력해 주세요.');
+      setState(() => _errorMessage = '관리자 인증값을 입력해 주세요.');
       return;
     }
 
-    if (_adminService.verifyAdminCode(code)) {
+    bool verified;
+    try {
+      verified = await _adminService.verifyAdminCode(code);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _errorMessage = 'NAS 관리자 인증 서버에 연결할 수 없습니다.');
+      return;
+    }
+    if (!mounted) return;
+    if (verified) {
       await _adminService.signInAsAdmin();
       if (!mounted) return;
       Navigator.pop(context, true);
@@ -65,7 +75,9 @@ class _AdminCodePageState extends State<AdminCodePage> {
           ),
           const SizedBox(height: 8),
           Text(
-            '6자리 관리자 승인코드를 입력하면\nPDF 및 앱 콘텐츠 관리 기능을 사용할 수 있습니다.',
+            BackendConfig.useNas
+                ? 'NAS에 설정한 관리자 토큰을 입력하세요. 앱을 종료하면 다시 입력해야 합니다.'
+                : '6자리 관리자 승인코드를 입력하면\nPDF 및 앱 콘텐츠 관리 기능을 사용할 수 있습니다.',
             textAlign: TextAlign.center,
             style: TextStyle(color: Colors.grey.shade600),
           ),
@@ -74,13 +86,12 @@ class _AdminCodePageState extends State<AdminCodePage> {
           TextField(
             controller: _codeController,
             obscureText: _obscure,
-            keyboardType: TextInputType.number,
-            maxLength: 6,
+            keyboardType: TextInputType.visiblePassword,
             autofocus: true,
             onSubmitted: (_) => _submit(),
             decoration: InputDecoration(
               labelText: '승인코드',
-              hintText: '6자리 숫자 코드 (기본: 123456)',
+              hintText: 'NAS: 관리자 토큰 / Firebase: 6자리 코드',
               errorText: _errorMessage,
               prefixIcon: const Icon(Icons.key_outlined),
               suffixIcon: IconButton(

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -86,23 +87,15 @@ class QnaItem {
 }
 
 class QnaService {
-  QnaService._() {
-    if (BackendConfig.useNas) {
-      unawaited(_flushPendingQuestions());
-      unawaited(_flushPendingUpdates());
-    }
-  }
+  QnaService._();
   static final QnaService instance = QnaService._();
   factory QnaService() => instance;
 
   static const String _collection = 'qna';
   static const String _localKey = 'qna_items_local_v1';
-  static const String _pendingKey = 'qna_pending_uploads_v1';
-  static const String _pendingUpdatesKey = 'qna_pending_updates_v1';
 
   final NasApiClient _nas = NasApiClient.instance;
   final Random _random = Random();
-  Future<void> _pendingFlushQueue = Future<void>.value();
 
   FirebaseFirestore get _db => FirebaseFirestore.instance;
 
@@ -116,8 +109,7 @@ class QnaService {
         '${DateTime.now().microsecondsSinceEpoch}-${_random.nextInt(0x7fffffff).toRadixString(16)}';
     final now = DateTime.now();
     final authorDeviceId = await NotificationService.instance.getDeviceId();
-    final notificationToken =
-        await NotificationService.instance.getFcmToken();
+    final notificationToken = await NotificationService.instance.getFcmToken();
 
     final newItem = QnaItem(
       id: id,
@@ -136,10 +128,12 @@ class QnaService {
 
     // 2. NAS는 먼저 대기열에 기록해 앱이 종료되어도 재전송할 수 있게 합니다.
     if (BackendConfig.useNas) {
-      await _enqueuePendingQuestion(newItem);
-      await _flushPendingQuestions();
+      await _nas.postJson('/api/qna', newItem.toJson());
+      await _saveLocalItem(newItem);
       return;
     }
+
+    await _saveLocalItem(newItem);
 
     // 3. Firestore 서버 저장
     try {
@@ -171,7 +165,7 @@ class QnaService {
                     (item) => QnaItem.fromJson(Map<String, dynamic>.from(item)))
                 .toList()
             : <QnaItem>[];
-        if (items.isNotEmpty) await _saveLocalList(items);
+        await _saveLocalList(items);
         return items;
       }
       final snapshot = await _db
@@ -204,6 +198,52 @@ class QnaService {
             snapshot.docs.map((doc) => QnaItem.fromFirestore(doc)).toList());
   }
 
+  Future<List<QnaItem>> getAdminQuestions() async {
+    if (BackendConfig.useNas && !_nas.hasAdminToken) return [];
+    try {
+      if (BackendConfig.useNas) {
+        final data = await _nas.getJson('/api/admin/qna', admin: true);
+        final rawItems = data['items'];
+        final items = rawItems is List
+            ? rawItems
+                .whereType<Map>()
+                .map(
+                    (item) => QnaItem.fromJson(Map<String, dynamic>.from(item)))
+                .toList()
+            : <QnaItem>[];
+        await _saveLocalList(items);
+        return items;
+      }
+
+      final snapshot = await _db
+          .collection(_collection)
+          .orderBy('createdAt', descending: true)
+          .limit(50)
+          .get();
+      final items =
+          snapshot.docs.map((doc) => QnaItem.fromFirestore(doc)).toList();
+      if (items.isNotEmpty) await _saveLocalList(items);
+      return items;
+    } catch (error) {
+      if (error is HttpException &&
+          (error.message.contains('401') || error.message.contains('403'))) {
+        return [];
+      }
+      return _loadLocalList();
+    }
+  }
+
+  Stream<List<QnaItem>> streamAdminQuestions() {
+    if (BackendConfig.useNas) return _nasAdminQuestionStream();
+    return _db
+        .collection(_collection)
+        .orderBy('createdAt', descending: true)
+        .limit(50)
+        .snapshots()
+        .map((snapshot) =>
+            snapshot.docs.map((doc) => QnaItem.fromFirestore(doc)).toList());
+  }
+
   /// 관리자: 질문에 답변 등록/수정
   Future<void> answerQuestion({
     required String questionId,
@@ -218,8 +258,7 @@ class QnaService {
     };
 
     if (BackendConfig.useNas) {
-      await _enqueuePendingUpdate(questionId, updates);
-      await _flushPendingUpdates();
+      await _nas.putJson('/api/qna/$questionId', updates);
     } else {
       await _db.collection(_collection).doc(questionId).set(
         {
@@ -255,8 +294,22 @@ class QnaService {
     await _saveLocalList(updated);
   }
 
+  Future<void> deleteQuestion(String questionId) async {
+    if (BackendConfig.useNas) {
+      await _nas.delete('/api/qna/$questionId');
+    } else {
+      await _db.collection(_collection).doc(questionId).delete();
+    }
+
+    final remaining = (await _loadLocalList())
+        .where((item) => item.id != questionId)
+        .toList();
+    await _saveLocalList(remaining);
+  }
+
   /// 관리자: 질문 읽음 처리
   Future<void> markAsReadByAdmin(String questionId) async {
+    if (BackendConfig.useNas && !_nas.isServerReachable) return;
     try {
       if (BackendConfig.useNas) {
         await _nas.putJson('/api/qna/$questionId', {'isReadByAdmin': true});
@@ -273,7 +326,7 @@ class QnaService {
   Future<int> getUnreadQuestionCount() async {
     try {
       if (BackendConfig.useNas) {
-        final items = await getQuestions();
+        final items = await getAdminQuestions();
         return items.where((item) => !item.isReadByAdmin).length;
       }
       final snapshot = await _db
@@ -289,7 +342,7 @@ class QnaService {
   /// 관리자용 읽지 않은 질문 수 Stream
   Stream<int> streamUnreadCount() {
     if (BackendConfig.useNas) {
-      return _nasQuestionStream().map(
+      return _nasAdminQuestionStream().map(
         (items) => items.where((item) => !item.isReadByAdmin).length,
       );
     }
@@ -301,8 +354,17 @@ class QnaService {
   }
 
   Stream<List<QnaItem>> _nasQuestionStream() async* {
+    yield await _loadLocalList();
     while (true) {
       yield await getQuestions();
+      await Future<void>.delayed(const Duration(seconds: 30));
+    }
+  }
+
+  Stream<List<QnaItem>> _nasAdminQuestionStream() async* {
+    yield _nas.hasAdminToken ? await _loadLocalList() : <QnaItem>[];
+    while (true) {
+      yield await getAdminQuestions();
       await Future<void>.delayed(const Duration(seconds: 30));
     }
   }
@@ -337,148 +399,5 @@ class QnaService {
     final list = await _loadLocalList();
     final updated = [item, ...list.where((e) => e.id != item.id)];
     await _saveLocalList(updated);
-  }
-
-  Future<List<QnaItem>> _loadPendingQuestions() async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_pendingKey);
-    if (raw == null || raw.isEmpty) return [];
-
-    try {
-      final decoded = jsonDecode(raw);
-      if (decoded is List) {
-        return decoded
-            .whereType<Map>()
-            .map((item) => QnaItem.fromJson(Map<String, dynamic>.from(item)))
-            .toList();
-      }
-    } catch (_) {}
-
-    return [];
-  }
-
-  Future<void> _savePendingQuestions(List<QnaItem> items) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(
-      _pendingKey,
-      jsonEncode(items.map((item) => item.toJson()).toList()),
-    );
-  }
-
-  Future<void> _addPendingQuestion(QnaItem item) async {
-    final pending = await _loadPendingQuestions();
-    final updated = [item, ...pending.where((old) => old.id != item.id)];
-    await _savePendingQuestions(updated);
-  }
-
-  Future<void> _enqueuePendingQuestion(QnaItem item) {
-    final operation = _pendingFlushQueue.then((_) {
-      return _addPendingQuestion(item);
-    });
-    _pendingFlushQueue = operation.catchError((_) {});
-    return operation;
-  }
-
-  Future<void> _flushPendingQuestions() {
-    final operation =
-        _pendingFlushQueue.then((_) => _flushPendingQuestionsOnce());
-    _pendingFlushQueue = operation.catchError((_) {});
-    return operation;
-  }
-
-  Future<void> _flushPendingQuestionsOnce() async {
-    if (!BackendConfig.useNas) return;
-
-    final pending = await _loadPendingQuestions();
-    if (pending.isEmpty) return;
-
-    var firstUnsent = pending.length;
-    for (var index = 0; index < pending.length; index++) {
-      try {
-        await _nas.postJson('/api/qna', pending[index].toJson());
-      } catch (_) {
-        firstUnsent = index;
-        break;
-      }
-    }
-
-    await _savePendingQuestions(pending.skip(firstUnsent).toList());
-  }
-
-  Future<List<Map<String, dynamic>>> _loadPendingUpdates() async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_pendingUpdatesKey);
-    if (raw == null || raw.isEmpty) return [];
-
-    try {
-      final decoded = jsonDecode(raw);
-      if (decoded is List) {
-        return decoded
-            .whereType<Map>()
-            .map((item) => Map<String, dynamic>.from(item))
-            .where(
-              (item) => item['questionId'] is String && item['updates'] is Map,
-            )
-            .toList();
-      }
-    } catch (_) {}
-
-    return [];
-  }
-
-  Future<void> _savePendingUpdates(
-    List<Map<String, dynamic>> updates,
-  ) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_pendingUpdatesKey, jsonEncode(updates));
-  }
-
-  Future<void> _enqueuePendingUpdate(
-    String questionId,
-    Map<String, dynamic> updates,
-  ) {
-    final operation = _pendingFlushQueue.then((_) async {
-      final pending = await _loadPendingUpdates();
-      final withoutSameQuestion = pending.where(
-        (item) => item['questionId'] != questionId,
-      );
-      await _savePendingUpdates([
-        ...withoutSameQuestion,
-        {
-          'questionId': questionId,
-          'updates': updates,
-        },
-      ]);
-    });
-    _pendingFlushQueue = operation.catchError((_) {});
-    return operation;
-  }
-
-  Future<void> _flushPendingUpdates() {
-    final operation =
-        _pendingFlushQueue.then((_) => _flushPendingUpdatesOnce());
-    _pendingFlushQueue = operation.catchError((_) {});
-    return operation;
-  }
-
-  Future<void> _flushPendingUpdatesOnce() async {
-    if (!BackendConfig.useNas) return;
-
-    final pending = await _loadPendingUpdates();
-    var firstUnsent = pending.length;
-    for (var index = 0; index < pending.length; index++) {
-      final item = pending[index];
-      try {
-        await _nas.putJson(
-          '/api/qna/${item['questionId']}',
-          Map<String, dynamic>.from(item['updates'] as Map),
-        );
-      } catch (_) {
-        firstUnsent = index;
-        break;
-      }
-    }
-
-    await _savePendingUpdates(pending.skip(firstUnsent).toList());
   }
 }

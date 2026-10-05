@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
@@ -38,6 +39,7 @@ class NotificationService {
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _qnaSubscription;
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _pdfSubscription;
   Timer? _nasTimer;
+  bool _nasPolling = false;
 
   String? _deviceId;
   String? _fcmToken;
@@ -59,14 +61,25 @@ class NotificationService {
     }
 
     if (firebaseEnabled && Firebase.apps.isNotEmpty) {
-      await _initializeFirebaseNotifications();
-    } else if (BackendConfig.useNas) {
+      await _initializeFirebaseNotifications(
+        watchFirestore: !BackendConfig.useNas,
+      );
+    }
+    if (BackendConfig.useNas) {
       _startNasPolling();
     }
   }
 
   Future<String> getDeviceId() async {
     if (_deviceId != null) return _deviceId!;
+
+    if (BackendConfig.useNas && Firebase.apps.isNotEmpty) {
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid != null && uid.isNotEmpty) {
+        _deviceId = uid;
+        return uid;
+      }
+    }
 
     final prefs = await SharedPreferences.getInstance();
     _deviceId = prefs.getString(_deviceIdKey);
@@ -117,7 +130,9 @@ class NotificationService {
     );
   }
 
-  Future<void> _initializeFirebaseNotifications() async {
+  Future<void> _initializeFirebaseNotifications({
+    required bool watchFirestore,
+  }) async {
     try {
       final messaging = FirebaseMessaging.instance;
       await messaging.requestPermission(
@@ -127,14 +142,15 @@ class NotificationService {
         provisional: false,
       );
 
+      if (BackendConfig.useNas && FirebaseAuth.instance.currentUser == null) {
+        await FirebaseAuth.instance.signInAnonymously();
+      }
+
       await messaging.setForegroundNotificationPresentationOptions(
         alert: false,
         badge: false,
         sound: false,
       );
-
-      _fcmToken = await messaging.getToken();
-      await _saveToken(_fcmToken);
 
       _messageSubscription = FirebaseMessaging.onMessage.listen(
         (message) => unawaited(showRemoteMessage(message)),
@@ -148,7 +164,22 @@ class NotificationService {
         unawaited(_saveToken(token));
       });
 
-      _watchFirestoreChanges();
+      if (defaultTargetPlatform == TargetPlatform.iOS) {
+        String? apnsToken;
+        for (var attempt = 0; attempt < 10; attempt++) {
+          apnsToken = await messaging.getAPNSToken();
+          if (apnsToken != null && apnsToken.isNotEmpty) break;
+          await Future<void>.delayed(const Duration(milliseconds: 500));
+        }
+        if (apnsToken == null || apnsToken.isEmpty) {
+          throw StateError('APNs token is not available yet.');
+        }
+      }
+
+      _fcmToken = await messaging.getToken();
+      await _saveToken(_fcmToken);
+
+      if (watchFirestore) _watchFirestoreChanges();
     } catch (error, stackTrace) {
       // Devices without Google Play services can still use the rest of the app.
       debugPrint('FCM initialization failed: $error');
@@ -168,6 +199,7 @@ class NotificationService {
         'token': token,
         'deviceId': deviceId,
         'platform': defaultTargetPlatform.name,
+        'backend': BackendConfig.useNas ? 'nas' : 'firebase',
         'updatedAt': FieldValue.serverTimestamp(),
       });
     } catch (error) {
@@ -265,7 +297,10 @@ class NotificationService {
   }
 
   Future<void> _pollNas() async {
+    if (_nasPolling) return;
+    _nasPolling = true;
     try {
+      final prefs = await SharedPreferences.getInstance();
       final qnaData = await _nas.getJson('/api/qna');
       final rawItems = qnaData['items'];
       if (rawItems is List) {
@@ -276,7 +311,11 @@ class NotificationService {
         if (!_qnaLoaded) {
           for (final item in snapshot) {
             final id = item['id']?.toString();
-            if (id != null) _qnaAnswers[id] = item['isAnswered'] == true;
+            if (id != null) {
+              _qnaAnswers[id] = prefs.getBool('nas_qna_answer_$id') ??
+                  (item['isAnswered'] == true);
+              await prefs.setBool('nas_qna_answer_$id', _qnaAnswers[id]!);
+            }
           }
           _qnaLoaded = true;
         } else {
@@ -296,15 +335,26 @@ class NotificationService {
               );
             }
             _qnaAnswers[id] = answered;
+            if (belongsToThisDevice) {
+              await prefs.setBool('nas_qna_answer_$id', answered);
+            }
           }
         }
       }
 
       final pdf = await _nas.getJson('/api/pdf/current/metadata');
       final version = '${pdf['updatedAt'] ?? ''}|${pdf['fileSize'] ?? ''}';
-      if (_pdfVersion == null) {
+      final previousVersion = _pdfVersion ?? prefs.getString('nas_pdf_version');
+      if (previousVersion == null) {
+        // A cached PDF can belong to an earlier backend or may have been used
+        // while the NAS was unavailable during the first app launch. Establish
+        // the baseline silently, and invalidate only if this process has not
+        // already downloaded the current NAS PDF.
         _pdfVersion = version;
-      } else if (_pdfVersion != version) {
+        if (!PdfCacheService().hasLoadedNasPdfFromServer) {
+          await _invalidatePdfCache();
+        }
+      } else if (previousVersion != version) {
         _pdfVersion = version;
         await _invalidatePdfCache();
         await _showIfEnabled(
@@ -313,8 +363,11 @@ class NotificationService {
           body: '새로운 말씀 PDF를 확인해 보세요.',
         );
       }
+      await prefs.setString('nas_pdf_version', version);
     } catch (error) {
       debugPrint('NAS notification polling failed: $error');
+    } finally {
+      _nasPolling = false;
     }
   }
 
@@ -369,7 +422,10 @@ class NotificationService {
 
     try {
       await _local.show(
-        id: DateTime.now().millisecondsSinceEpoch.remainder(0x7fffffff),
+        // NAS foreground polling and FCM can detect the same change at nearly
+        // the same time. A stable ID makes the second delivery update the
+        // first notification instead of duplicating it in the tray.
+        id: (payload ?? type).hashCode & 0x7fffffff,
         title: title,
         body: body,
         notificationDetails: const NotificationDetails(

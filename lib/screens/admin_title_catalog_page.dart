@@ -404,7 +404,7 @@ confidence를 넣으면 검수 필요 여부에 반영합니다.'''),
       final key = DatePageMapper.monthDayKey(date);
       final title = titles[key] ?? '';
       final confidence = confidences[key] ?? 0.0;
-      final isLowConfidence = title.isEmpty || confidence < 0.80;
+      final isLowConfidence = title.isEmpty || confidence < 0.60;
 
       return (
         date: date,
@@ -642,13 +642,11 @@ confidence를 넣으면 검수 필요 여부에 반영합니다.'''),
                           ? Colors.amber.shade50
                           : null,
                       leading: SizedBox(
-                        width: 112,
+                        width: 52,
                         child: Text(
-                          DateFormat('yyyy년 M월 d일', 'ko_KR').format(item.date),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
+                          DateFormat('M/d', 'ko_KR').format(item.date),
                           style: TextStyle(
-                            fontWeight: FontWeight.w700,
+                            fontWeight: FontWeight.w800,
                             color: item.isLowConfidence
                                 ? Colors.red.shade800
                                 : null,
@@ -700,6 +698,13 @@ confidence를 넣으면 검수 필요 여부에 반영합니다.'''),
                             ),
                           ],
                         ],
+                      ),
+                      subtitle: Text(
+                        '${DateFormat('yyyy년 M월 d일 (E)', 'ko_KR').format(item.date)} · PDF ${item.page}페이지',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey.shade600,
+                        ),
                       ),
                       trailing: const Icon(Icons.edit_outlined),
                       onTap: () => _editTitle(item.date),

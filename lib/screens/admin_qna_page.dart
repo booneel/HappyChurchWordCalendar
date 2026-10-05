@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../services/backend_config.dart';
+import '../services/nas_api_client.dart';
 import '../services/qna_service.dart';
 
 class AdminQnaPage extends StatefulWidget {
@@ -17,9 +19,11 @@ class _AdminQnaPageState extends State<AdminQnaPage> {
   void _openAnswerDialog(QnaItem item) {
     final answerController = TextEditingController(text: item.answer ?? '');
     final dateFormat = DateFormat('yyyy년 M월 d일 HH:mm', 'ko_KR');
+    final readOnly = BackendConfig.useNas &&
+        (!NasApiClient.instance.hasAdminToken ||
+            !NasApiClient.instance.isServerReachable);
 
-    // 읽음 처리
-    _qnaService.markAsReadByAdmin(item.id);
+    if (!readOnly) _qnaService.markAsReadByAdmin(item.id);
 
     showDialog<void>(
       context: context,
@@ -83,8 +87,15 @@ class _AdminQnaPageState extends State<AdminQnaPage> {
                   ),
                 ),
                 const SizedBox(height: 6),
+                if (readOnly)
+                  const Padding(
+                    padding: EdgeInsets.only(bottom: 12),
+                    child: Text(
+                        '오프라인에서는 저장된 Q&A를 읽기만 할 수 있습니다. NAS에 다시 연결되면 답변할 수 있습니다.'),
+                  ),
                 TextField(
                   controller: answerController,
+                  readOnly: readOnly,
                   minLines: 4,
                   maxLines: 8,
                   maxLength: 500,
@@ -101,36 +112,95 @@ class _AdminQnaPageState extends State<AdminQnaPage> {
           ),
         ),
         actions: [
+          if (!readOnly)
+            TextButton.icon(
+              onPressed: () => _confirmAndDeleteQuestion(item, dialogContext),
+              icon: const Icon(Icons.delete_outline),
+              label: const Text('질문 삭제'),
+              style: TextButton.styleFrom(foregroundColor: Colors.red),
+            ),
           TextButton(
             onPressed: () => Navigator.pop(dialogContext),
             child: const Text('취소'),
           ),
-          FilledButton(
-            onPressed: () async {
-              final text = answerController.text.trim();
-              if (text.isEmpty) {
+          if (!readOnly)
+            FilledButton(
+              onPressed: () async {
+                final text = answerController.text.trim();
+                if (text.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('답변 내용을 입력해 주세요.')),
+                  );
+                  return;
+                }
+
+                try {
+                  await _qnaService.answerQuestion(
+                    questionId: item.id,
+                    answer: text,
+                  );
+                } catch (_) {
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                        content: Text(
+                            'NAS에 연결되지 않아 답변을 저장하지 못했습니다. 다시 연결한 뒤 시도해 주세요.')),
+                  );
+                  return;
+                }
+
+                if (!mounted || !dialogContext.mounted) return;
+                Navigator.pop(dialogContext);
+
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('답변 내용을 입력해 주세요.')),
-                );
-                return;
-              }
-
-              await _qnaService.answerQuestion(
-                questionId: item.id,
-                answer: text,
-              );
-
-              if (!mounted || !dialogContext.mounted) return;
-              Navigator.pop(dialogContext);
-
-              ScaffoldMessenger.of(context)
-                  .showSnackBar(const SnackBar(content: Text('답변이 등록되었습니다.')));
-            },
-            child: const Text('답변 저장'),
-          ),
+                    const SnackBar(content: Text('답변이 등록되었습니다.')));
+              },
+              child: const Text('답변 저장'),
+            ),
         ],
       ),
     ).whenComplete(answerController.dispose);
+  }
+
+  Future<void> _confirmAndDeleteQuestion(
+    QnaItem item,
+    BuildContext dialogContext,
+  ) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (confirmContext) => AlertDialog(
+        title: const Text('질문 삭제'),
+        content: Text('「${item.title}」 질문을 삭제할까요? 삭제하면 복구할 수 없습니다.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(confirmContext, false),
+            child: const Text('취소'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(confirmContext, true),
+            child: const Text('삭제'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    try {
+      await _qnaService.deleteQuestion(item.id);
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('질문을 삭제하지 못했습니다. 연결과 관리자 권한을 확인해 주세요.')),
+      );
+      return;
+    }
+
+    if (!mounted || !dialogContext.mounted) return;
+    Navigator.pop(dialogContext);
+    setState(() {});
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('질문을 삭제했습니다.')),
+    );
   }
 
   @override
@@ -140,7 +210,7 @@ class _AdminQnaPageState extends State<AdminQnaPage> {
     return Scaffold(
       appBar: AppBar(title: const Text('QnA 질문 및 답변 관리')),
       body: StreamBuilder<List<QnaItem>>(
-        stream: _qnaService.streamQuestions(),
+        stream: _qnaService.streamAdminQuestions(),
         builder: (context, snapshot) {
           final items = snapshot.data ?? [];
 

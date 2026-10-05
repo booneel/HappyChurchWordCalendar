@@ -29,6 +29,9 @@ class PdfCacheService {
 
   File? _memoryFile;
   Future<File>? _loading;
+  bool _lastNasLoadSucceeded = false;
+
+  bool get hasLoadedNasPdfFromServer => _lastNasLoadSucceeded;
 
   Future<File> preload() => getCachedPdf();
 
@@ -138,9 +141,11 @@ class PdfCacheService {
         await download.timeout(offlineProbeTimeout);
       }
       await prefs.setInt(_lastCheckKey, DateTime.now().millisecondsSinceEpoch);
+      _lastNasLoadSucceeded = true;
     } catch (_) {
       // NAS가 잠시 끊겨도 기존 캐시가 있으면 앱을 계속 사용할 수 있습니다.
       if (await file.exists()) {
+        _lastNasLoadSucceeded = false;
         _memoryFile = file;
         return file;
       }

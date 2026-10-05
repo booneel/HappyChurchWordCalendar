@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../services/backend_config.dart';
 import '../services/local_profile_service.dart';
+import '../services/nas_api_client.dart';
 import '../services/qna_service.dart';
 
 class QnaPage extends StatefulWidget {
@@ -19,106 +21,33 @@ class _QnaPageState extends State<QnaPage> {
   String _filterMode = 'all'; // 'all', 'faq', 'answered'
 
   Future<void> _openAskDialog() async {
-    final titleController = TextEditingController();
-    final contentController = TextEditingController();
     final name = await _profileService.getName() ?? '사용자';
 
     if (!mounted) return;
 
-    final result = await showDialog<bool>(
+    final draft = await showDialog<_QuestionDraft>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        insetPadding: const EdgeInsets.symmetric(
-          horizontal: 18,
-          vertical: 24,
-        ),
-        title: const Text('QnA 질문하기'),
-        content: ConstrainedBox(
-          constraints: BoxConstraints(
-            maxHeight: MediaQuery.sizeOf(context).height * 0.56,
-          ),
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                TextField(
-                  controller: titleController,
-                  autofocus: true,
-                  maxLength: 40,
-                  decoration: const InputDecoration(
-                    labelText: '질문 제목',
-                    hintText: '궁금하신 내용을 한 줄로 요약해 주세요',
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: contentController,
-                  minLines: 4,
-                  maxLines: 8,
-                  maxLength: 500,
-                  keyboardType: TextInputType.multiline,
-                  textInputAction: TextInputAction.newline,
-                  decoration: const InputDecoration(
-                    labelText: '질문 내용',
-                    hintText: '자세한 내용을 입력해 주세요',
-                    alignLabelWithHint: true,
-                    contentPadding: EdgeInsets.all(14),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('취소'),
-          ),
-          FilledButton(
-            onPressed: () {
-              final title = titleController.text.trim();
-              final content = contentController.text.trim();
-
-              if (title.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('질문 제목을 입력해 주세요.')),
-                );
-                return;
-              }
-
-              if (content.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('질문 내용을 입력해 주세요.')),
-                );
-                return;
-              }
-
-              Navigator.pop(dialogContext, true);
-            },
-            child: const Text('질문 등록'),
-          ),
-        ],
-      ),
+      builder: (_) => _AskQuestionDialog(name: name),
     );
-    final title = titleController.text.trim();
-    final content = contentController.text.trim();
-    titleController.dispose();
-    contentController.dispose();
+    if (draft == null || !mounted) return;
 
-    if (result == true) {
+    try {
       await _qnaService.createQuestion(
-        title: title,
-        content: content,
-        authorName: name,
+        title: draft.title,
+        content: draft.content,
+        authorName: draft.anonymous ? '익명' : name,
       );
-
       if (!mounted) return;
-
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('질문이 성공적으로 등록되었습니다.')));
-
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('질문이 성공적으로 등록되었습니다.')),
+      );
       setState(() {});
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('NAS에 연결되지 않아 질문을 등록하지 못했습니다. 다시 연결한 뒤 시도해 주세요.')),
+      );
     }
   }
 
@@ -150,13 +79,6 @@ class _QnaPageState extends State<QnaPage> {
                   spacing: 8,
                   runSpacing: 2,
                   children: [
-                    Text(
-                      '작성자: ${item.authorName}',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey.shade600,
-                      ),
-                    ),
                     Text(
                       dateFormat.format(item.createdAt),
                       style: TextStyle(
@@ -400,11 +322,24 @@ class _QnaPageState extends State<QnaPage> {
                         ),
                     ],
                     const SizedBox(height: 16),
-                    FilledButton.icon(
-                      onPressed: _openAskDialog,
-                      icon: const Icon(Icons.edit_outlined),
-                      label: const Text('질문하기'),
-                    ),
+                    if (!BackendConfig.useNas)
+                      FilledButton.icon(
+                        onPressed: _openAskDialog,
+                        icon: const Icon(Icons.edit_outlined),
+                        label: const Text('질문하기'),
+                      )
+                    else
+                      ValueListenableBuilder<bool?>(
+                        valueListenable: NasApiClient.serverReachability,
+                        builder: (context, reachable, _) => FilledButton.icon(
+                          onPressed: reachable == true ? _openAskDialog : null,
+                          icon: Icon(reachable == true
+                              ? Icons.edit_outlined
+                              : Icons.cloud_off_outlined),
+                          label: Text(
+                              reachable == true ? '질문하기' : 'NAS 연결 후 질문 가능'),
+                        ),
+                      ),
                   ],
                 );
               },
@@ -412,6 +347,152 @@ class _QnaPageState extends State<QnaPage> {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _QuestionDraft {
+  const _QuestionDraft({
+    required this.title,
+    required this.content,
+    required this.anonymous,
+  });
+
+  final String title;
+  final String content;
+  final bool anonymous;
+}
+
+class _AskQuestionDialog extends StatefulWidget {
+  const _AskQuestionDialog({required this.name});
+
+  final String name;
+
+  @override
+  State<_AskQuestionDialog> createState() => _AskQuestionDialogState();
+}
+
+class _AskQuestionDialogState extends State<_AskQuestionDialog> {
+  final TextEditingController _titleController = TextEditingController();
+  final TextEditingController _contentController = TextEditingController();
+  bool _anonymous = false;
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    _contentController.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final title = _titleController.text.trim();
+    final content = _contentController.text.trim();
+
+    if (title.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('질문 제목을 입력해 주세요.')),
+      );
+      return;
+    }
+    if (content.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('질문 내용을 입력해 주세요.')),
+      );
+      return;
+    }
+
+    Navigator.of(context).pop(
+      _QuestionDraft(
+        title: title,
+        content: content,
+        anonymous: _anonymous,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      insetPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 24),
+      title: const Text('QnA 질문하기'),
+      content: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.sizeOf(context).height * 0.56,
+        ),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '작성자 표시',
+                style: Theme.of(context).textTheme.labelLarge,
+              ),
+              const SizedBox(height: 8),
+              SegmentedButton<bool>(
+                segments: const [
+                  ButtonSegment<bool>(
+                    value: false,
+                    icon: Icon(Icons.badge_outlined),
+                    label: Text('닉네임'),
+                  ),
+                  ButtonSegment<bool>(
+                    value: true,
+                    icon: Icon(Icons.visibility_off_outlined),
+                    label: Text('익명'),
+                  ),
+                ],
+                selected: <bool>{_anonymous},
+                onSelectionChanged: (selection) {
+                  setState(() => _anonymous = selection.first);
+                },
+              ),
+              const SizedBox(height: 4),
+              Text(
+                _anonymous
+                    ? '관리자에게도 익명으로 표시됩니다.'
+                    : '닉네임 "${widget.name}"이 관리자에게 표시됩니다.',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _titleController,
+                autofocus: true,
+                maxLength: 40,
+                decoration: const InputDecoration(
+                  labelText: '질문 제목',
+                  hintText: '궁금하신 내용을 한 줄로 요약해 주세요',
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _contentController,
+                minLines: 4,
+                maxLines: 8,
+                maxLength: 500,
+                keyboardType: TextInputType.multiline,
+                textInputAction: TextInputAction.newline,
+                decoration: const InputDecoration(
+                  labelText: '질문 내용',
+                  hintText: '자세한 내용을 입력해 주세요',
+                  alignLabelWithHint: true,
+                  contentPadding: EdgeInsets.all(14),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('취소'),
+        ),
+        FilledButton(
+          onPressed: _submit,
+          child: const Text('질문 등록'),
+        ),
+      ],
     );
   }
 }

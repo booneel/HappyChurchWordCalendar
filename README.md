@@ -1,2398 +1,291 @@
-# The Word DatePDF 📖
+# DatePDF: Synology DS1825+ 설치와 앱 연결
 
-> **최종 기준 문서 — v7.1**
->
-> 이 문서는 현재 프로젝트를 새 PC에서 다시 세팅하고, Firebase를 연결하고,
-> Android에서 실행하고, GitHub에 백업/업로드하는 데 필요한 내용을 한 곳에 정리한 문서입니다.
->
-> 과거 README나 OCR/제목 자동추출 관련 문서와 내용이 충돌하면 **이 문서를 우선**합니다.
+이 프로젝트는 날짜별 PDF 보기, 제목 카탈로그, 조회수, Q&A, 관리자 PDF 교체를 제공한다. 기본 빌드는 Firebase를 사용한다. `DATEPDF_BACKEND=nas`로 빌드하면 Flutter 앱이 `python/nas_api.py`의 FastAPI 서버에 연결한다. NAS 서버는 PDF와 JSON 파일, SQLite를 `/data`에 저장한다. 실제 DS1825+에 접속해 설치한 상태는 아니며, 아래 순서는 NAS 소유자가 DSM에서 수행해야 한다.
 
----
+## 1. 디스크 계획
 
-# 1. 프로젝트 개요
+| 용도 | 물리 디스크 | DSM 설정 | 대략적인 사용 가능 용량 |
+| --- | --- | --- | --- |
+| 주 저장소 `/volume1` | 4 TB × 4 | 저장소 풀 1, SHR-1, Btrfs 볼륨 1 | 약 12 TB(표기 단위로 약 10.9 TiB, 파일 시스템 예약분 제외) |
+| 보조 저장소 `/volume2` | 20 TB × 1 | 저장소 풀 2, Basic, Btrfs 볼륨 2 | 약 20 TB(약 18.2 TiB, 예약분 제외) |
 
-The Word DatePDF는 날짜를 기준으로 365일 묵상 PDF의 해당 페이지를 자동으로 열어주는 Flutter 앱입니다.
+4 TB 4개를 같은 풀에 넣어 1개 고장을 견디게 한다. 20 TB를 4 TB 풀에 섞지 않는다. 단일 20 TB 디스크는 고장 시 전체가 사라질 수 있으므로 `/volume2`는 *두 번째 사본*이며 유일한 보관 장소가 아니다. 랜섬웨어·도난·화재는 같은 NAS의 두 볼륨에 영향을 준다. 중요한 데이터는 별도 USB 디스크, 다른 NAS 또는 클라우드에 세 번째 사본을 둔다. 4 TB 4개에 SHR-2를 택하면 두 디스크 고장을 견디지만 용량이 약 8 TB로 준다. 현재 용도라면 SHR-1 + 보조/외부 백업이 균형이 좋다. 기존 디스크에 데이터가 있으면 풀 생성 전에 다른 장소로 백업한다. 새 풀 생성은 대상 디스크를 초기화한다.
 
-사용자는 PDF 페이지 번호를 직접 찾지 않아도 됩니다.
+1. DS1825+와 디스크의 정확한 모델이 [Synology 호환 목록](https://www.synology.com/en-global/compatibility?model=DS1825%2B&search_by=drives)에 있는지 확인한다. DSM/펌웨어를 최신 안정 버전으로 업데이트하고 각 디스크 SMART 상태를 확인한다.
+2. DSM `저장소 관리자 > 저장소`에서 **새 저장소 풀 1**을 만든다. 4 TB 네 개만 선택, RAID 유형 `SHR (1개 디스크 보호)`를 선택한다. 이 풀에 **볼륨 1**, `Btrfs`, 가능한 용량 전체를 만든다. 풀 생성·검사·동기화 완료까지 기다린다.
+3. 같은 화면에서 20 TB 한 개만 골라 **저장소 풀 2**, 유형 `Basic`, **볼륨 2** `Btrfs`를 만든다. `/volume1`과 `/volume2` 번호는 생성 순서에 따라 확인한다. 다르면 아래 경로도 실제 번호에 맞춘다.
+4. `저장소 관리자 > HDD/SSD`에서 SMART 빠른 검사 일정과 정기 확장 검사를 잡고, `데이터 스크러빙`은 지원되는 풀 1에 월 1회 저사용 시간대로 설정한다. Btrfs 공유 폴더에 데이터 체크섬을 켜고, `Snapshot Replication`의 스냅샷을 예를 들어 하루 1회/30일 보관으로 설정한다. 스냅샷·RAID는 백업을 대체하지 않는다.
 
-예:
+## 2. DSM에서 폴더와 패키지 만들기
 
-```text
-2026년 1월 1일   → PDF 4페이지
-2026년 1월 2일   → PDF 5페이지
-...
-2026년 9월 23일  → PDF 269페이지
-...
-2026년 12월 31일 → PDF 368페이지
-```
-
-앱에서는 날짜를 선택하면 자동으로 해당 페이지를 계산한 뒤 PDF를 엽니다.
-
----
-
-# 2. 최종 방향
-
-제목은 일반 사용자 화면에서 매번 OCR하지 않습니다.
-관리자 화면에서 PDF 365페이지를 한 번 분석하고, 날짜별 제목과 confidence를 저장합니다.
-분석은 PDF 구조·위치·글자 크기·문맥을 먼저 사용하며 Android/iOS에서는 필요한 경우 OCR로 보완합니다.
-
-사용자 화면은 저장된 제목 카탈로그만 조회합니다.
+`제어판 > 공유 폴더 > 생성`으로 아래 공유 폴더를 만든다. 관리자만 쓰기 가능하게 하고 일반 사용자/guest 권한은 없앤다. `datepdf-data`의 Btrfs 데이터 체크섬을 활성화한다. File Station에서 하위 폴더를 만든다.
 
 ```text
-오늘의 말씀
-2026년 9월 23일 (수)
-
-오늘의 말씀을 확인해보세요.
-
-[오늘 말씀 보기]
+/volume1/docker/datepdf/            # Container Manager 프로젝트 폴더
+  compose.yaml
+  .env                         # NAS에서 직접 생성. Git에 올리지 않음
+  app/
+    Dockerfile.nas
+    nas_api.py
+    nas_requirements.txt
+/volume1/datepdf-data/               # 공유 폴더: 서버 영구 데이터
+  data/
+    current.pdf                 # 최초 배포 전 Firebase에서 가져오기
+    catalog.json                # 최초 이전 시 선택
+    settings.json               # 최초 이전 시 선택
+    qna.json                    # 최초 시작 전 이전용
+    stats.json                  # 최초 시작 전 이전용
+    datepdf.sqlite3             # 서버가 생성
+  backups/                      # 서버가 PDF/JSON 교체 전 사본 생성
+/volume2/datepdf-backup/             # Hyper Backup 대상 공유 폴더
 ```
 
-찾아보기:
+공유 폴더 이름은 `docker`, `datepdf-data`, `datepdf-backup`이다. `docker`와 `datepdf-data`는 볼륨 1, `datepdf-backup`은 볼륨 2를 고른다. `data`, `backups`, `app`은 File Station 하위 폴더다. `백업` 폴더는 컨테이너에 연결하지 않는다. `패키지 센터`에서 **Container Manager**, **Hyper Backup**, **Snapshot Replication**, **Security Advisor**, 원격 접속 시 **Tailscale**을 설치한다. DS1825+에서 Container Manager 사용 가능 여부는 설치 전 DSM 패키지 센터에서 확인한다.
 
-```text
-오늘의 말씀
-2026년 9월 23일 (수)
+## 3. Firebase 데이터 이전
 
-[보기]
-```
-
-많이 본 말씀:
-
-```text
-🥇
-말씀
-9월 23일
-12회
-```
-
-최근 본 말씀:
-
-```text
-오늘의 말씀
-2026년 9월 23일 (수)
-```
-
-즉 페이지 번호와 OCR 제목을 사용자에게 강조하지 않고
-**날짜 중심의 말씀 앱**으로 운영합니다.
-
----
-
-# 3. 현재 주요 기능
-
-현재 프로젝트 기준 기능입니다.
-
-- Flutter Android/iOS 앱
-- Firebase 초기화
-- Firebase Storage PDF 연결
-- Firebase Firestore 연결
-- Firebase Storage PDF 로컬 캐시
-- `pdfrx` 실제 PDF Viewer
-- 날짜 → PDF 페이지 자동 계산
-- 오늘의 말씀 바로 열기
-- 날짜로 말씀 찾아보기
-- 한국어 날짜/달력
-- 사용자 이름 로컬 저장
-- 관리자 모드
-- 직접 클릭 조회수 기록
-- 많이 본 말씀 TOP 3
-- 최근 직접 열어본 말씀 기록
-- QnA UI 및 관리자 답변 관리
-- 제목 카탈로그 JSON 가져오기
-- PDF 내부 스크롤은 조회수에서 제외
-
----
-
-# 4. 최종 하단 메뉴
-
-```text
-🔎 찾아보기 | 🏠 홈 | 💬 QnA
-```
-
-과거의 `일정` 메뉴는 `찾아보기`로 변경했습니다.
-
----
-
-# 5. 최종 관리자 센터
-
-관리자 센터에는 제목 카탈로그와 검수 화면이 포함됩니다.
-
-```text
-관리자 센터
-
-📄 PDF 관리
-📅 날짜 / 페이지 관리
-📝 제목 카탈로그 & 검수
-📊 방문 통계
-🕘 최근 이용 기록
-💬 QnA 관리
-```
-
-제목 confidence가 낮은 항목은 검수 목록에서 날짜별로 확인·수정할 수 있습니다.
-
-관리자 제목 카탈로그에서는 JSON 파일을 불러와 날짜별 제목을 한 번에 등록할 수도 있습니다. 불러오기 전에 파일 형식과 등록할 제목 개수를 확인하며, 확인 대화상자에서 불러오기를 누르면 카탈로그에 즉시 저장됩니다.
-
----
-
-# 6. 프로젝트 경로
-
-현재 개발 경로 기준:
-
-```text
-D:\my_portfolio\Date-Pdf
-```
-
-다른 PC에서는 경로가 달라도 됩니다.
-
-다만 Windows에서 프로젝트가 `D:`에 있고 Flutter Pub Cache가 `C:`에 있을 경우
-Kotlin incremental cache 오류가 발생했던 이력이 있으므로
-뒤의 `PUB_CACHE` 설정을 반드시 참고하세요.
-
----
-
-# 7. 권장 프로젝트 구조
-
-```text
-Date-Pdf/
-│
-├── android/
-│   ├── app/
-│   │   └── build.gradle.kts
-│   ├── build.gradle.kts
-│   └── gradle.properties
-│
-├── lib/
-│   ├── main.dart
-│   ├── firebase_options.dart
-│   │
-│   ├── screens/
-│   │   ├── app_shell.dart
-│   │   ├── home_page.dart
-│   │   ├── schedule_page.dart
-│   │   ├── pdf_page.dart
-│   │   ├── qna_page.dart
-│   │   ├── settings_page.dart
-│   │   ├── admin_code_page.dart
-│   │   └── admin_page.dart
-│   │
-│   └── services/
-│       ├── admin_service.dart
-│       ├── date_page_mapper.dart
-│       ├── local_profile_service.dart
-│       ├── pdf_cache_service.dart
-│       ├── pdf_repository.dart
-│       └── view_history_service.dart
-│
-├── pubspec.yaml
-├── README.md
-└── ...
-```
-
----
-
-# 8. 제목 분석 파일
-
-제목 분석과 검수에는 아래 파일을 사용합니다.
-
-```text
-lib/screens/admin_title_catalog_page.dart
-
-lib/services/pdf_catalog_service.dart
-lib/services/pdf_catalog_builder_service.dart
-```
-
-`admin_title_catalog_page.dart`는 JSON 가져오기·자동 분석 실행·confidence 검수·수동 수정을 담당하고, `pdf_catalog_service.dart`는 JSON 파싱과 Firebase/NAS/로컬 저장을 담당합니다. `pdf_catalog_builder_service.dart`는 PDF 레이아웃 분석과 한글 OCR 보완을 담당합니다.
-
-PowerShell:
+데이터를 이전하는 동안 기존 앱에서 PDF/제목/Q&A 변경을 잠시 중지한다. 먼저 Firebase의 Storage PDF와 Firestore `pdf_catalog/current`, `pdf_settings/config`, `pdf_documents/current`, `qna`, `page_stats`를 별도 백업한다. PC에서 Google Cloud/Firebase 서비스 계정 JSON을 안전하게 받아 다음 명령을 실행한다. 계정 파일은 프로젝트 저장소나 NAS 웹 공유 폴더에 넣지 않는다.
 
 ```powershell
 cd D:\my_portfolio\Date-Pdf
-
-Get-ChildItem .\lib -Recurse -Filter *.dart |
-Select-String "pdf_catalog_service|pdf_catalog_builder_service|admin_title_catalog_page"
+python -m pip install firebase-admin
+python python/export_firebase_to_nas.py --service-account C:\secure\firebase-service-account.json --bucket date-pdf.firebasestorage.app --output C:\secure\datepdf-export
 ```
 
-아무 결과가 없으면 삭제 가능합니다.
+`C:\secure\datepdf-export\data`의 파일을 File Station/SMB로 `/volume1/datepdf-data/data/`에 복사한다. **서버 첫 시작 전에** `qna.json`과 `stats.json`을 복사해야 SQLite에 자동 이관된다. 이미 서버를 시작했다면 데이터베이스를 임의로 덮어쓰지 말고 NAS 백업 후 별도 이전 절차를 잡는다. Firebase 원본은 NAS 데이터와 제목/질문/조회수를 대조하고 복원 시험을 마칠 때까지 보존한다. 서비스 계정과 복사본은 민감한 데이터이므로 접근을 제한한다.
 
----
+## 4. 서버 배포
 
-# 9. ML Kit 제목 보완 분석
+### NAS 토큰 만들기와 배치
 
-ML Kit는 일반 사용자 화면이 아니라 관리자 제목 분석 작업에서만 사용합니다. 자동 분석은 PDF 텍스트 구조를 먼저 확인하고, 결과의 확신도가 낮을 때 한글 OCR을 보완 실행합니다.
-Android/iOS 관리자 빌드에는 다음 패키지가 필요합니다.
+토큰은 NAS API가 요청자를 확인하는 비밀번호처럼 동작한다. **사용자 토큰**은 앱의 일반 기능(Q&A 읽기/질문 등록 포함)에 쓰고, **관리자 토큰**은 PDF 교체·설정/제목 수정·Q&A 답변 같은 쓰기 권한을 확인하는 데 쓴다. 두 값은 서로 달라야 한다. 가장 쉬운 방법은 `deploy/synology/generate_tokens.bat`을 실행하는 것이다. Python 3가 없는 PC에서는 아래 명령으로 사용자/관리자 토큰을 각각 생성할 수 있다.
 
 ```powershell
-google_mlkit_text_recognition: ^0.17.1
+python -c "import secrets; print(secrets.token_urlsafe(48))"
 ```
 
-한글 OCR release 빌드가 누락되지 않도록 `android/app/build.gradle.kts`에 아래 의존성을 유지합니다.
+첫 번째 출력은 사용자 토큰, 두 번째 출력은 관리자 토큰으로 비밀번호 관리자에 따로 보관한다. 실제 값을 README, 메신저, Git 저장소에 붙여 넣지 않는다.
 
-```kotlin
-implementation("com.google.mlkit:text-recognition-korean:16.0.1")
+NAS File Station에서 `deploy/synology/env.example`을 참고해 `/volume1/docker/datepdf/.env`를 만든다. 파일에는 아래 두 줄을 넣고 각 오른쪽 값을 방금 만든 값으로 바꾼다. 예시 문구 `replace-with-...`를 그대로 두면 서버가 시작되지 않는다.
+
+```dotenv
+DATEPDF_NAS_TOKEN=여기에_사용자_토큰
+DATEPDF_NAS_ADMIN_TOKEN=여기에_관리자_토큰
 ```
 
-분석 서비스에서는 한글 인식 스크립트를 명시적으로 사용합니다.
+토큰은 저장소의 `deploy/synology/generate_tokens.bat`을 Windows에서 실행해 만들 수 있다. Python 3가 필요하다. 사용자/관리자 NAS 토큰과 FCM 중계용 비밀값이 한 번에 출력된다. NAS 토큰 두 개는 NAS `.env`에 넣고, FCM 중계를 설정할 때만 `DATEPDF_NAS_PUSH_SECRET`을 NAS `.env`와 `functions/.env`의 `NAS_PUSH_SECRET`에 똑같이 넣는다. 값은 화면에만 출력되므로 안전한 비밀번호 관리자에 보관하고 저장소나 메신저에 올리지 않는다.
 
-```dart
-TextRecognizer(script: TextRecognitionScript.korean)
+`compose.yaml`이 이 `.env`를 컨테이너에 전달한다. 토큰을 바꾼 뒤에는 NAS 프로젝트 폴더에서 `sudo docker compose up -d --force-recreate`를 실행해 컨테이너를 다시 만든다. 실제 `.env`는 NAS에만 두고 Git에 올리지 않는다.
+
+| 토큰 | 사용 위치 | 권한/주의 |
+| --- | --- | --- |
+| `DATEPDF_NAS_TOKEN` 사용자 토큰 | NAS `.env`와 Flutter APK 빌드 명령 | 앱 일반 API 접근용. APK에 포함되므로 APK를 받은 사람이 값을 추출할 수 있다. 모든 앱 설치가 같은 값을 공유한다. |
+| `DATEPDF_NAS_ADMIN_TOKEN` 관리자 토큰 | NAS `.env`와 앱 관리자 코드 입력 화면 | 관리자 API 전용. **APK 빌드 명령에 넣지 않는다.** 관리자 기기에서 관리자 모드에 들어갈 때 직접 입력하며 앱을 다시 시작하면 재입력한다. |
+| `DATEPDF_NAS_PUSH_SECRET` 중계 비밀값 | NAS `.env`와 `functions/.env`의 `NAS_PUSH_SECRET` | NAS 서버와 Cloud Function 사이의 인증용. 앱 빌드에 넣지 않는다. |
+
+사용자 토큰이 노출되면 NAS `.env`의 사용자 토큰을 새 값으로 바꾸고 컨테이너를 재시작한 다음, 새 사용자 토큰으로 APK를 다시 빌드해 사용자 기기에 배포한다. 관리자 토큰이 노출되면 관리자 토큰만 새 값으로 바꾸고 컨테이너를 재시작한 뒤 관리자 기기에서 새 토큰을 입력한다. 토큰은 VPN/Tailscale과 HTTPS를 대신하지 않는다.
+
+1. 이 저장소의 `deploy/synology/compose.yaml`을 NAS `/volume1/docker/datepdf/compose.yaml`로, `python/Dockerfile.nas`, `python/nas_api.py`, `python/nas_requirements.txt`를 `.../app/`으로 복사한다. 토큰은 위의 **NAS 토큰 만들기와 배치** 절차대로 NAS `.env`에 설정한다.
+2. SSH에서 `sudo chmod 600 /volume1/docker/datepdf/.env`를 실행한다. 프로젝트와 데이터 폴더는 관리자 외의 계정이 읽거나 수정하지 못하도록 DSM 공유 폴더 권한을 확인한다. 초기 PDF/JSON도 컨테이너에서 읽을 수 있어야 한다.
+3. `Container Manager > 프로젝트 > 생성`에서 프로젝트명 `datepdf`, 경로 `/volume1/docker/datepdf`, `compose.yaml` 사용을 선택한다. 이미지를 빌드하고 프로젝트를 시작한다. CLI를 쓰면 해당 폴더에서 `sudo docker compose up -d --build`를 실행한다. `sudo docker compose logs --tail=100 datepdf-api`로 오류가 없는지 확인한다.
+4. 호스트 포트는 `127.0.0.1:8787`에만 열린다. NAS SSH에서 아래처럼 확인한다. Windows에서는 `curl.exe`를 사용한다.
+
+```sh
+curl -i -H 'Authorization: Bearer <USER_TOKEN>' http://127.0.0.1:8787/api/settings/pdf
+curl -i -H 'Authorization: Bearer <ADMIN_TOKEN>' http://127.0.0.1:8787/api/admin/check
 ```
 
-제목 후보는 날짜 위치, 제목과 본문의 글자 크기, 문장 길이, 줄 간격, 성경 구절·본문 문장 여부를 함께 점수화합니다. 확신도가 낮은 결과는 관리자 검수 목록에 표시됩니다.
+둘 다 200이어야 하고 잘못된 토큰은 401 또는 403이어야 한다. 파일 교체 시 `.../app/`에 새 코드를 복사하고 `sudo docker compose up -d --build`를 다시 실행한다. **Container Manager의 프로젝트 `정리/Clean` 또는 공유 폴더 삭제는 데이터 보존을 확인하기 전 사용하지 않는다.** 컨테이너 재시작만으로 `/volume1/datepdf-data`는 유지된다.
 
-## 9.1 제목 JSON 가져오기 형식
+### SSH 터미널 접속
 
-관리자 센터 → `제목 카탈로그 & 검수` → `JSON 제목 파일 불러오기`에서 파일을 선택합니다. 다음 형식을 지원합니다.
-
-```json
-{
-  "year": 2026,
-  "titles": {
-    "01-01": "새해의 소망",
-    "01-02": "믿음의 길"
-  }
-}
-```
-
-배열 형식도 사용할 수 있습니다.
-
-```json
-[
-  {"date": "2026-01-01", "title": "새해의 소망"},
-  {"month": 1, "day": 2, "title": "믿음의 길"}
-]
-```
-
-날짜는 `MM-DD`, `YYYY-MM-DD`, `1월 2일`, `M/D` 형식을 인식합니다. 제목 필드는 `title`, `name`, `text`, `content`, `devotionalTitle`, `제목`, `말씀`을 사용할 수 있습니다. `confidence`를 함께 넣으면 검수 필요 여부에 반영하며, confidence가 없으면 가져온 제목을 확신도 100%로 저장합니다.
-
-```json
-{
-  "year": 2026,
-  "titles": {
-    "01-01": "새해의 소망"
-  },
-  "confidences": {
-    "01-01": 0.72
-  }
-}
-```
-
-JSON을 불러오면 기존 화면의 편집 목록을 새 내용으로 교체합니다. 확인 대화상자에서 `불러오기`를 누르면 Firebase/NAS와 로컬 카탈로그에 즉시 저장됩니다.
-
----
-
-# 10. PDF 파일
-
-현재 Firebase Storage 기준 파일:
-
-```text
-365일 매일묵상말씀.pdf
-```
-
-Storage URI 예:
-
-```text
-gs://date-pdf.firebasestorage.app/365일 매일묵상말씀.pdf
-```
-
-코드에서는 일반적으로:
-
-```dart
-FirebaseStorage.instance.ref('365일 매일묵상말씀.pdf');
-```
-
-형태로 접근합니다.
-
-향후 더 관리하기 쉬운 구조는:
-
-```text
-pdf/current.pdf
-```
-
-처럼 고정 경로를 사용하는 것입니다.
-
----
-
-# 11. PDF 페이지 구조
-
-현재 PDF:
-
-```text
-총 368페이지
-```
-
-구조:
-
-```text
-1~3페이지      앞부분
-4페이지         1월 1일
-5페이지         1월 2일
-...
-269페이지       9월 23일
-...
-368페이지       12월 31일
-```
-
-핵심 상수:
-
-```dart
-static const int dailyStartPdfPage = 4;
-static const int dailyPageCount = 365;
-```
-
----
-
-# 12. 날짜 → PDF 페이지 계산
-
-담당 파일:
-
-```text
-lib/services/date_page_mapper.dart
-```
-
-개념:
-
-```text
-PDF 페이지 = 해당 연도의 날짜 순번 + 3
-```
-
-예:
-
-```text
-1월 1일
-= 1번째 날
-= 1 + 3
-= PDF 4페이지
-```
-
-```text
-9월 23일
-= 266번째 날
-= 266 + 3
-= PDF 269페이지
-```
-
-사용:
-
-```dart
-final page = DatePageMapper.pdfPageForDate(date);
-```
-
-역변환:
-
-```dart
-final date = DatePageMapper.dateForPdfPage(
-  page,
-  year: 2026,
-);
-```
-
----
-
-# 13. 윤년 주의
-
-현재 PDF는 365일 기준입니다.
-
-따라서 윤년 PDF에서 2월 29일이 별도 페이지로 포함되면
-현재 계산 방식과 맞지 않을 수 있습니다.
-
-현재 로직은 365일용 PDF 기준으로 유지합니다.
-
-윤년용 PDF를 실제로 운영하게 될 경우 별도 매핑 정책을 추가해야 합니다.
-
----
-
-# 14. PDF Viewer 속도 구조
-
-초기 방식:
-
-```text
-PDF 버튼 클릭
-→ Firebase URL 요청
-→ 네트워크에서 PDF 열기
-→ 페이지 이동
-```
-
-이 방식은 느렸습니다.
-
-현재 권장 방식:
-
-```text
-앱 시작
-→ Firebase Storage PDF를 기기에 캐시
-→ 이후 로컬 PDF 사용
-→ PdfViewer.file()
-```
-
-담당 파일:
-
-```text
-lib/services/pdf_cache_service.dart
-```
-
-사용자는 두 번째 실행부터 훨씬 빠르게 PDF를 열 수 있습니다.
-
----
-
-# 15. PDF 선로딩
-
-앱 홈 화면을 보는 동안 PDF를 미리 준비합니다.
-
-예:
-
-```dart
-PdfCacheService().preload();
-```
-
-따라서 사용자가 `오늘 말씀 보기`를 누른 시점에는
-이미 PDF가 로컬에 준비되어 있을 가능성이 높습니다.
-
----
-
-# 16. Firebase PDF 변경 확인
-
-로컬 PDF가 있어도 Firebase의 PDF가 바뀌면 새 파일을 내려받아야 합니다.
-
-Firebase Storage의 `generation` 메타데이터를 비교하는 방식으로 운영합니다.
-
-```text
-Firebase generation
-vs
-로컬 저장 generation
-```
-
-같음:
-
-```text
-기존 로컬 PDF 사용
-```
-
-다름:
-
-```text
-새 PDF 다운로드
-```
-
-네트워크 확인을 너무 자주 하지 않도록 일정 시간 동안 메타데이터 체크를 생략할 수 있습니다.
-
-예:
-
-```dart
-Duration(hours: 6)
-```
-
----
-
-# 17. 조회수 집계 정책
-
-매우 중요합니다.
-
-조회수는 **사용자가 말씀을 직접 눌러 PDF에 진입한 경우만** 올라갑니다.
-
-## 조회수 +1
-
-예:
-
-```text
-홈 → 오늘 말씀 보기
-찾아보기 → 보기
-많이 본 말씀 카드 직접 클릭
-최근 본 말씀 직접 클릭
-```
-
-## 조회수 증가 안 함
-
-```text
-PDF 안에서 손가락으로 스크롤
-스크롤해서 다른 페이지가 보임
-PdfViewer의 onPageChanged
-PDF 내부 이전 버튼
-PDF 내부 다음 버튼
-```
-
-즉:
-
-```text
-"스크롤 중 우연히 지나간 페이지"
-```
-
-는 조회수에 포함하지 않습니다.
-
----
-
-# 18. 조회수 Firestore 구조
-
-예:
-
-```text
-page_stats
-└── 269
-    ├── page: 269
-    ├── views: 12
-    ├── countType: "direct_open_only"
-    └── lastDirectOpenedAt: Timestamp
-```
-
-담당 서비스:
-
-```text
-lib/services/view_history_service.dart
-```
-
-직접 진입할 때:
-
-```dart
-history.recordDirectOpen(
-  page: page,
-  date: date,
-);
-```
-
-를 호출합니다.
-
----
-
-# 19. 최근 본 말씀
-
-최근 본 말씀도 `직접 진입`만 기록합니다.
-
-PDF에서 스크롤하다 지나간 페이지는 최근 기록에 들어가지 않습니다.
-
-현재 최근 기록은 기기 로컬 `SharedPreferences`를 사용할 수 있습니다.
-
-예:
-
-```text
-오늘의 말씀
-2026년 9월 23일 (수)
-```
-
----
-
-# 20. 많이 본 말씀
-
-Firestore `page_stats`에서 직접 클릭 수가 높은 페이지를 가져옵니다.
-
-표시:
-
-```text
-🥇
-말씀
-9월 23일
-12회
-```
-
-즉:
-
-```text
-순위
-고정 표시 "말씀"
-날짜
-직접 클릭 조회수
-```
-
-구조입니다.
-
----
-
-# 21. 사용자 이름
-
-일반 사용자는 별도의 회원가입 없이 사용할 수 있습니다.
-
-사용자 이름은 표시용입니다.
-
-```text
-사용자 이름
-↓
-SharedPreferences
-↓
-"사용자님"
-```
-
-인증용 데이터가 아닙니다.
-
----
-
-# 22. 관리자 모드
-
-흐름:
-
-```text
-설정
-↓
-관리자 모드
-↓
-승인코드 입력
-↓
-관리자 센터
-```
-
-현재 승인코드 방식은 개발용 프로토타입입니다.
-
-실제 서비스에서 관리자 비밀번호/승인코드를 앱 코드에 하드코딩하면 안 됩니다.
-
-최종 서비스에서는:
-
-```text
-Flutter
-↓
-서버 / Cloud Function
-↓
-승인코드 검증
-↓
-Firebase Auth / Custom Claims
-↓
-관리자 권한
-```
-
-방식을 권장합니다.
-
----
-
-# 23. 한국어 날짜 설정
-
-과거 다음 오류가 있었습니다.
-
-```text
-LocaleDataException:
-Locale data has not been initialized
-```
-
-`main.dart`에서 반드시:
-
-```dart
-import 'package:intl/date_symbol_data_local.dart';
-```
-
-그리고 Firebase 초기화 전에:
-
-```dart
-await initializeDateFormatting('ko_KR', null);
-```
-
-를 실행합니다.
-
----
-
-# 24. 한국어 달력
-
-`CalendarDatePicker`를 한국어로 표시하려면
-`MaterialApp`에 locale 설정이 필요합니다.
-
-```dart
-locale: const Locale('ko', 'KR'),
-
-supportedLocales: const [
-  Locale('ko', 'KR'),
-],
-
-localizationsDelegates: const [
-  GlobalMaterialLocalizations.delegate,
-  GlobalWidgetsLocalizations.delegate,
-  GlobalCupertinoLocalizations.delegate,
-],
-```
-
-필요 import:
-
-```dart
-import 'package:flutter_localizations/flutter_localizations.dart';
-```
-
----
-
-# 25. 현재 주요 Flutter 패키지
-
-최종 방향 기준 예:
-
-```yaml
-dependencies:
-  flutter:
-    sdk: flutter
-
-  flutter_localizations:
-    sdk: flutter
-
-  firebase_core:
-  firebase_auth:
-  firebase_storage:
-  cloud_firestore:
-
-  shared_preferences:
-  intl:
-  pdfrx:
-  path_provider:
-  file_picker:
-```
-
-프로젝트 실제 `pubspec.yaml`이 최종 기준입니다.
-
----
-
-# 26. 새 PC 세팅 — Flutter
-
-Flutter 설치 후:
+시놀로지에는 DSM 화면에 내장된 터미널 창이 따로 있는 게 아니라, DSM에서 SSH를 켠 다음 PC의 터미널로 접속한다. `제어판 > 터미널 및 SNMP > 터미널 > SSH 서비스 활성화`에서 켜고, Windows PowerShell에서 다음처럼 접속한다. `NAS_IP`는 DSM에서 확인한 내부 IP, 계정은 DSM 관리자 그룹 계정이다.
 
 ```powershell
-flutter --version
-flutter doctor -v
+ssh DSM관리자계정@NAS_IP
 ```
 
-Android 관련 항목에 치명적인 오류가 없는지 확인합니다.
+비밀번호를 입력하면 NAS 명령줄이 열린다. Docker 명령은 관리자 권한이 필요한 경우 앞에 `sudo`를 붙인다. 예: `sudo docker compose logs --tail=100 datepdf-api`. `exit`로 접속을 끝낸다. SSH는 LAN 또는 VPN에서만 허용하고 공유기에서 SSH 포트를 포워딩하지 않는다. 원격 터미널이 필요하지 않을 때 SSH 서비스를 끄면 공격 표면을 줄일 수 있다. 단계는 [Synology SSH 안내](https://kb.synology.com/ko-kr/DSM/tutorial/How_to_login_to_DSM_with_root_permission_via_SSH_Telnet)를 참고한다.
 
----
+실행 중인 Python 컨테이너 안에 들어가야 할 때는 프로젝트 폴더(`/volume1/docker/datepdf`)에서 `sudo docker compose exec datepdf-api sh`를 실행한다. 컨테이너 안에서는 `python -V`로 버전을 확인하고 `exit`로 나온다. 서버는 컨테이너 시작 시 이미 자동 실행되므로 컨테이너 안에서 `python nas_api.py`를 또 실행하지 않는다. Container Manager의 프로젝트 화면에서 로그와 시작/중지 상태도 확인할 수 있다.
 
-# 27. JDK 17
+## 5. 네트워크와 방화벽
 
-현재 프로젝트는 JDK 17 사용을 권장합니다.
+기본 권장: 공유기에서 이 앱용 **포트 포워딩을 만들지 않는다.** NAS와 휴대폰에 Tailscale을 설치하고 같은 tailnet에 로그인한다. Tailscale 관리자 콘솔에서 기기 접근 규칙을 NAS와 허용된 휴대폰으로 제한하고, HTTPS 및 MagicDNS를 켠다. NAS SSH에서 다음 명령을 실행해 로컬 API를 tailnet 안의 HTTPS 주소로 제공한다. `tailscale serve status`에 표시된 `https://NAS이름.도메인.ts.net`을 앱의 URL로 사용한다. `Funnel`은 켜지 않는다. Tailscale 패키지 CLI 경로/버전이 다르면 공식 안내를 확인한다.
 
-설치:
+```sh
+sudo /var/packages/Tailscale/target/bin/tailscale serve --bg http://127.0.0.1:8787
+sudo /var/packages/Tailscale/target/bin/tailscale serve status
+```
+
+DSM `제어판 > 보안 > 방화벽`에서 **자기 LAN 대역의 DSM 관리 포트**와 필요한 Tailscale 접근을 먼저 허용한 뒤, 나머지 원치 않는 인바운드를 거부한다. 규칙은 위에서 아래 순서로 첫 일치 규칙이 적용된다. 방화벽 저장 전 다른 브라우저/기기로 관리 화면 접근을 확인해 잠금을 피한다. Tailscale의 Synology TUN 구성을 사용했다면 공식 안내대로 `100.64.0.0/10` 소스 허용 규칙이 필요한지 확인한다. `8787`은 외부 허용하지 않는다. DSM의 `admin`/`guest` 계정을 비활성화하고 별도 관리자 계정에 MFA를 켠다. 자동 차단/계정 보호, 보안 어드바이저 검사, DSM·패키지 자동 업데이트, UPS와 알림 이메일도 설정한다. SMB는 LAN/VPN에만 허용한다.
+
+공용 인터넷으로 제공해야 한다면 먼저 **사용자별 인증과 Q&A 접근 제어**를 추가해야 한다. 현재 사용자 토큰은 APK에서 추출 가능하고 `/api/qna`가 전체 질문을 반환하므로, HTTPS 역방향 프록시와 포트 포워딩만으로는 공개 서비스에 적합하지 않다. 이후 사용자 인증을 구현한 경우에는 DSM `제어판 > 로그인 포털 > 고급 > 역방향 프록시`에서 별도 앱 도메인 HTTPS 443 → `127.0.0.1:8787`을 만들고 도메인 인증서를 지정한다. 공유기에는 TCP 443만 NAS로 전달하며 HTTP 80은 인증서 발급 방식에 필요한 경우에만 임시 허용한다. DSM 5000/5001, SSH 22, API 8787, SMB 445는 포워딩하지 않는다. CGNAT/이중 NAT라면 단순 포트 포워딩은 작동하지 않으므로 VPN을 사용한다.
+
+## 6. 앱 빌드와 확인
+
+앱은 빌드할 때 연결할 백엔드가 정해진다. `DATEPDF_BACKEND`를 지정하지 않으면 Firebase 빌드가 된다. Firebase 프로젝트 설정은 `android/app/google-services.json` 및 `lib/firebase_options.dart`를 사용한다.
+
+### 새 Firebase 프로젝트 만들기와 앱 연결
+
+먼저 데이터 저장 방식을 정한다.
+
+- **NAS 데이터 + Firebase 푸시:** PDF/Q&A/설정은 NAS에 저장한다. Firebase는 FCM, NAS 푸시 중계 Cloud Function, 기기 토큰 목록에만 쓴다. 이 저장소의 NAS FCM 중계는 Firebase Cloud Functions를 쓰므로 결제 계정을 연결한 Blaze 요금제가 필요하다.
+- **Firebase 데이터 + Firebase 푸시:** Firestore에 Q&A/설정/통계를 저장하고 Cloud Storage에 PDF를 저장한다. 이 저장소의 Firebase PDF 교체 기능에 Cloud Storage가 필요하며, 새 Firebase Storage 버킷 사용에도 Blaze 요금제가 필요하다. Cloud Functions도 Blaze가 필요하다. Blaze는 사용량에 따른 결제이므로 Google Cloud에서 예산 알림을 설정하고 사용량을 확인한다. 예산 알림은 자동 지출 차단 장치가 아니다.
+
+#### 1) 프로젝트와 앱 ID 정하기
+
+1. [Firebase Console](https://console.firebase.google.com/)에서 `프로젝트 추가`를 누르고 새 프로젝트를 만든다. Google Analytics는 선택 사항이다. 프로젝트 ID는 생성 후 바꾸기 어렵기 때문에 용도를 알아볼 수 있게 정한다.
+2. Firebase Console의 프로젝트 설정에서 앱을 등록한다. 현재 프로젝트의 Android `applicationId`는 `com.example.date_pdf`이고 iOS Bundle ID는 `com.example.datePdf`라는 예제 값이다. Android 패키지명은 대소문자까지 정확히 일치해야 하고 Firebase에 등록한 뒤 변경할 수 없으므로, 배포용 고유 ID를 쓰려면 **Firebase 앱 등록 전에** Android `android/app/build.gradle.kts`와 iOS Xcode Runner Bundle ID를 먼저 바꾼다. 지금 값을 유지한다면 각 플랫폼에 위의 현재 값을 그대로 등록한다.
+3. iPhone도 배포할 경우 Apple Developer에서 실제 앱 Bundle ID를 등록하고 그 ID를 Xcode Runner target에도 적용한다. Apple Developer 계정 없이 iOS용 APNs 푸시 설정을 완료할 수 없다.
+
+#### 2) Windows PC에서 FlutterFire 연결
+
+Node.js/npm, Flutter SDK, Android Studio가 설치된 PC에서 PowerShell을 연다. Firebase CLI와 FlutterFire CLI를 한 번 설치하고 로그인한다.
 
 ```powershell
-winget install EclipseAdoptium.Temurin.17.JDK
-```
-
-설치 후 PowerShell을 새로 열고:
-
-```powershell
-java -version
-```
-
-정상 예:
-
-```text
-openjdk version "17..."
-```
-
----
-
-# 28. JAVA_HOME
-
-주의:
-
-`JAVA_HOME`에는 `java.exe`까지 넣지 않습니다.
-
-잘못된 예:
-
-```text
-C:\Program Files\Eclipse Adoptium\jdk-17...\bin\java.exe
-```
-
-정상:
-
-```text
-C:\Program Files\Eclipse Adoptium\jdk-17...
-```
-
-예:
-
-```powershell
-$env:JAVA_HOME="C:\Program Files\Eclipse Adoptium\jdk-17.0.20.101-hotspot"
-$env:Path="$env:JAVA_HOME\bin;$env:Path"
-```
-
-Flutter에도 지정:
-
-```powershell
-flutter config --jdk-dir "C:\Program Files\Eclipse Adoptium\jdk-17.0.20.101-hotspot"
-```
-
-확인:
-
-```powershell
-flutter doctor -v
-```
-
----
-
-# 29. Android SDK / NDK
-
-과거 오류:
-
-```text
-Package ndk not found.
-Package 28.2.13676358 not found.
-```
-
-프로젝트에서 사용했던 NDK:
-
-```text
-28.2.13676358
-```
-
-Android Studio:
-
-```text
-Tools
-→ SDK Manager
-→ SDK Tools
-→ Show Package Details
-→ NDK (Side by side)
-→ 28.2.13676358
-```
-
-같이 설치 권장:
-
-```text
-Android SDK Command-line Tools
-Android SDK Build-Tools
-CMake
-NDK (Side by side)
-```
-
-확인:
-
-```powershell
-Get-ChildItem "$env:LOCALAPPDATA\Android\sdk\ndk"
-```
-
----
-
-# 30. 중요 — D: 프로젝트 / C: Pub Cache 오류
-
-실제로 발생했던 오류:
-
-```text
-Could not close incremental caches
-```
-
-```text
-this and base files have different roots
-```
-
-원인:
-
-```text
-프로젝트
-D:\my_portfolio\Date-Pdf
-
-Flutter Pub Cache
-C:\Users\...\AppData\Local\Pub\Cache
-```
-
-처럼 서로 다른 드라이브였습니다.
-
----
-
-# 31. PUB_CACHE를 D:로 이동
-
-폴더 생성:
-
-```powershell
-New-Item -ItemType Directory -Force "D:\PubCache"
-```
-
-현재 PowerShell:
-
-```powershell
-$env:PUB_CACHE="D:\PubCache"
-```
-
-영구 설정:
-
-```powershell
-[Environment]::SetEnvironmentVariable(
-    "PUB_CACHE",
-    "D:\PubCache",
-    "User"
-)
-```
-
-PowerShell을 새로 연 뒤 확인:
-
-```powershell
-echo $env:PUB_CACHE
-```
-
-정상:
-
-```text
-D:\PubCache
-```
-
----
-
-# 32. Pub Cache 변경 후 캐시 삭제
-
-```powershell
-cd D:\my_portfolio\Date-Pdf
-```
-
-Gradle daemon 종료:
-
-```powershell
-cd android
-.\gradlew --stop
-cd ..
-```
-
-캐시 삭제:
-
-```powershell
-flutter clean
-
-Remove-Item -Recurse -Force build -ErrorAction SilentlyContinue
-Remove-Item -Recurse -Force .dart_tool -ErrorAction SilentlyContinue
-Remove-Item -Recurse -Force android\.gradle -ErrorAction SilentlyContinue
-```
-
-다시:
-
-```powershell
-flutter pub get
-```
-
-확인:
-
-```powershell
-Select-String -Path ".dart_tool\package_config.json" -Pattern "D:/PubCache"
-```
-
----
-
-# 33. Kotlin cache 대응
-
-필요 시:
-
-```text
-android/gradle.properties
-```
-
-에:
-
-```properties
-kotlin.incremental=false
-kotlin.compiler.execution.strategy=in-process
-```
-
-를 사용할 수 있습니다.
-
-단, C:/D: 드라이브 충돌이 원인이라면 먼저 `PUB_CACHE`를 해결해야 합니다.
-
----
-
-# 34. Firebase 연결
-
-FlutterFire CLI:
-
-```powershell
+npm install -g firebase-tools
 dart pub global activate flutterfire_cli
-```
-
-Firebase CLI 로그인:
-
-```powershell
 firebase login
-```
-
-프로젝트 루트:
-
-```powershell
 cd D:\my_portfolio\Date-Pdf
+firebase projects:list
+flutterfire configure --project=여기에_새_Firebase_프로젝트_ID
 ```
 
-설정:
+플랫폼 선택 화면에서 사용하는 플랫폼(Android, iOS)을 고른다. 등록 앱이 없으면 CLI가 만들도록 진행한다. CLI는 `lib/firebase_options.dart`, Firebase 연결 정보와 `firebase.json`을 갱신한다. Android 설정 파일 `android/app/google-services.json`이 새 프로젝트의 값인지 확인한다. iOS의 경우 `GoogleService-Info.plist`가 `ios/Runner/`에 있는지 확인하고, 없으면 Firebase Console에서 iOS 앱의 plist를 내려받아 그 위치에 넣는다. `firebase_options.dart` 안의 Project ID와 앱 ID가 새 Firebase 프로젝트 값인지 확인한다. 이 파일들을 예전 프로젝트 값으로 남겨두면 새 프로젝트에 연결되지 않는다.
+
+Functions를 새 프로젝트에 배포하려면 저장소 루트에서 프로젝트 별칭도 지정한다.
 
 ```powershell
-flutterfire configure
+firebase use --add
 ```
 
-Firebase 프로젝트:
+대화형 목록에서 새 프로젝트를 선택하고 `default` 같은 별칭을 지정한다. `firebase use` 출력이 새 프로젝트 ID인지 확인한다. 같은 소스에서 여러 Firebase 프로젝트를 다룰 때는 배포 전에 현재 선택 프로젝트를 반드시 확인한다.
 
-```text
-date-pdf
-```
+#### 3) Firebase 서비스 설정
 
-Android를 반드시 포함합니다.
+1. Firebase Console의 `Firestore Database > 데이터베이스 만들기`에서 데이터베이스를 만든다. NAS 푸시 전용으로 쓸 때도 FCM 기기 토큰을 저장할 Firestore가 필요하다. 위치는 사용자와 NAS/Functions에 가까운 곳으로 정한다. 생성 후 `Rules` 탭에 저장소의 `firestore.nas.rules` 내용을 붙여 넣고 게시한다. 이 규칙은 NAS 푸시 전용이며, 앱의 Firestore 데이터 접근은 전부 차단한다.
+2. Firebase Console의 `Authentication > Sign-in method`에서 `Anonymous` 로그인을 사용 설정한다. NAS 모드 앱은 알림 토큰을 기기에 연결하기 위해 익명 Firebase 로그인을 자동 수행한다. 사용자가 별도 계정을 만들거나 토큰을 직접 입력하지 않는다. 앱을 처음 실행하고 알림 권한을 허용하면 FCM 토큰이 `notification_tokens`에 기록된다. 익명 사용자는 앱 데이터 로그인 용도가 아니라 이 토큰을 해당 기기의 UID에 묶는 용도다.
+3. NAS에서 백그라운드 푸시를 받을 계획이면 `functions/.env.example`을 `functions/.env`로 복사해 `NAS_PUSH_SECRET`을 설정하고, 같은 값을 NAS `.env`의 `DATEPDF_NAS_PUSH_SECRET`에 둔다. `firebase deploy --only functions`를 실행해 `notifyNasEvent` 포함 Functions를 배포하고, 출력된 HTTPS URL을 NAS `.env`의 `DATEPDF_NAS_PUSH_URL`에 넣는다. NAS 코드/요구사항 파일을 복사하고 `sudo docker compose up -d --build`로 재빌드한다. SMTP 값은 관리자 이메일 알림을 쓸 때만 입력한다.
+4. **Firebase를 데이터 백엔드로 쓸 때만:** `Storage > 시작하기`에서 기본 버킷을 만든다. 새 프로젝트의 버킷 이름은 보통 `<프로젝트ID>.firebasestorage.app` 형식이며, `flutterfire configure` 후 `firebase_options.dart`에 새 버킷이 반영됐는지 확인한다. 이 앱은 Storage 파일 `365일 매일묵상말씀.pdf`와 Firestore 문서 `pdf_documents/current`, `pdf_catalog/current`, `pdf_settings/config`, `qna`, `page_stats`를 사용한다.
 
----
+**보안 주의:** Firestore/Storage를 테스트 모드 규칙으로 공개하지 않는다. NAS 데이터 모드에서는 `firestore.nas.rules`만 사용한다. 이 규칙은 익명 인증된 기기가 자기 UID에 연결된 NAS용 알림 토큰만 쓰도록 허용하고 나머지 Firestore 읽기/쓰기는 거부한다. 따라서 이 규칙을 Firebase 데이터 모드에 적용하면 앱의 Q&A/설정/통계 읽기와 쓰기가 모두 막힌다. Firebase 데이터 모드에는 별도의 사용자 인증, 관리자 권한, Firestore/Storage 규칙이 필요하다. 현재 Firebase 기본 앱의 관리자 코드 `123456`은 서버 인증이 아니며, 공개 배포용 관리자 보안으로 사용할 수 없다.
 
-# 35. firebase_options.dart
+#### 4) iPhone FCM 설정
 
-`flutterfire configure`가 완료되면:
+Firebase Console에 iOS 앱을 등록한 것만으로 APNs 설정이 끝나지는 않는다. Apple Developer에서 해당 App ID에 Push Notifications를 켜고 APNs 인증 키(.p8)를 만든다. Xcode에서 Runner의 `Push Notifications`와 `Background Modes > Remote notifications`를 활성화하고, APNs 키와 Key ID, Team ID를 Firebase Console `Project settings > Cloud Messaging`에 한 번 업로드한다. 이 설정은 앱 운영자가 한 번 하면 되고, 각 iPhone 사용자가 토큰을 등록하지 않는다. 사용자는 앱을 열어 알림 권한을 허용하면 된다. Firebase Flutter 설정 과정과 Apple 푸시 요구사항은 [FlutterFire 설정 안내](https://firebase.google.com/docs/flutter/setup), [FCM Flutter 시작 안내](https://firebase.google.com/docs/cloud-messaging/flutter/get-started)를 참고한다.
 
-```text
-lib/firebase_options.dart
-```
+#### 5) 새 설정으로 빌드하고 확인
 
-가 생성/갱신됩니다.
-
-Windows에서 Flutter 앱을 실행할 경우 Windows 설정도 선택해야 합니다.
-
-Android만 사용할 경우 Android 디바이스에서 실행하면 됩니다.
-
----
-
-# 35.1. iOS 실행
-
-iOS 빌드와 실기기 실행은 macOS와 Xcode가 설치된 환경에서 진행합니다. 프로젝트 루트에서 다음을 실행한 뒤 Xcode에서 서명 팀을 선택합니다.
-
-```bash
-flutter pub get
-flutter build ios --no-codesign --config-only
-open ios/Runner.xcworkspace
-```
-
-Xcode에서 `Runner` target의 `Signing & Capabilities` → `Automatically manage signing`을 켜고 Apple ID의 Team을 선택합니다. 이후 iPhone 또는 iOS Simulator를 선택해 실행합니다. `main.dart` 파일을 직접 Xcode로 여는 것이 아니라 `ios/Runner.xcworkspace`를 엽니다.
-
-현재 iOS Bundle ID는 `com.example.datePdf`이며 `lib/firebase_options.dart`의 iOS 설정과 맞춰져 있습니다. Bundle ID를 바꾸면 Firebase Console에 같은 iOS 앱을 등록하고 `flutterfire configure`를 다시 실행해야 합니다.
-
----
-
-# 36. Firestore 데이터베이스 생성
-
-실제로 발생했던 오류:
-
-```text
-The database (default) does not exist for project date-pdf
-```
-
-해결:
-
-Firebase Console:
-
-```text
-date-pdf
-→ Build
-→ Firestore Database
-→ Create database
-```
-
-반드시 `(default)` Firestore database를 생성합니다.
-
-현재 코드:
-
-```dart
-FirebaseFirestore.instance
-```
-
-는 `(default)` DB를 사용합니다.
-
----
-
-# 37. Firestore Rules
-
-개발 중에는 테스트 규칙을 사용할 수 있지만
-실제 배포 전에 반드시 보안 규칙을 정리해야 합니다.
-
-특히 보호 대상:
-
-```text
-관리자 데이터
-PDF 관리 데이터
-QnA 관리자 답변
-민감한 쓰기 작업
-```
-
-일반 사용자에게 전체 Firestore 쓰기 권한을 주지 않는 것을 권장합니다.
-
----
-
-# 38. Firebase Storage
-
-현재 Storage에는 PDF가 있어야 합니다.
-
-예:
-
-```text
-365일 매일묵상말씀.pdf
-```
-
-앱에서 파일을 읽지 못할 경우:
-
-- Storage 파일명 확인
-- Firebase 프로젝트 확인
-- Storage Rules 확인
-- `firebase_options.dart` 프로젝트 확인
-
-순서로 확인합니다.
-
----
-
-# 39. 평소 실행 방법
-
-PowerShell:
-
-```powershell
-cd D:\my_portfolio\Date-Pdf
-```
-
-Pub Cache 확인:
-
-```powershell
-echo $env:PUB_CACHE
-```
-
-필요하면:
-
-```powershell
-$env:PUB_CACHE="D:\PubCache"
-```
-
-패키지:
+새 프로젝트에 연결한 다음 앱을 다시 빌드한다. NAS 빌드라면 아래 NAS 빌드 명령도 새 `firebase_options.dart`와 Android/iOS Firebase 설정 파일을 사용한다.
 
 ```powershell
 flutter pub get
-```
-
-디바이스:
-
-```powershell
-flutter devices
-```
-
-실행:
-
-```powershell
-flutter run
-```
-
----
-
-# 40. 완전 재빌드
-
-빌드가 이상할 때:
-
-```powershell
-cd D:\my_portfolio\Date-Pdf
-
-cd android
-.\gradlew --stop
-cd ..
-
-flutter clean
-
-Remove-Item -Recurse -Force build -ErrorAction SilentlyContinue
-Remove-Item -Recurse -Force .dart_tool -ErrorAction SilentlyContinue
-Remove-Item -Recurse -Force android\.gradle -ErrorAction SilentlyContinue
-
-flutter pub get
-flutter run
-```
-
----
-
-# 41. 과거 오류 — Dart const
-
-오류:
-
-```text
-Not a constant expression
-```
-
-원인:
-
-런타임 값:
-
-```dart
-todayPdfPage
-```
-
-를:
-
-```dart
-children: const [...]
-```
-
-안에 넣음.
-
-해결:
-
-해당 부모의 `const` 제거.
-
----
-
-# 42. 과거 오류 — Windows Firebase 미설정
-
-```text
-DefaultFirebaseOptions have not been configured for windows
-```
-
-해결:
-
-```powershell
-flutterfire configure
-```
-
-에서 Windows 추가.
-
-또는 Android 에뮬레이터를 선택해서 실행.
-
----
-
-# 43. 과거 오류 — JAVA_HOME 없음
-
-```text
-JAVA_HOME is not set
-```
-
-해결:
-
-JDK 17 설치 + `JAVA_HOME` 설정.
-
----
-
-# 44. 과거 오류 — java.exe\bin\java
-
-오류:
-
-```text
-...\bin\java.exe\bin\java
-```
-
-원인:
-
-JDK 경로 설정에 `bin\java.exe`까지 넣음.
-
-해결:
-
-JDK 최상위 폴더까지만 지정.
-
----
-
-# 45. 과거 오류 — NDK
-
-```text
-Package ndk not found
-```
-
-```text
-Package 28.2.13676358 not found
-```
-
-해결:
-
-Android Studio SDK Manager에서 NDK `28.2.13676358` 설치.
-
----
-
-# 46. 과거 오류 — Kotlin different roots
-
-```text
-this and base files have different roots
-```
-
-해결:
-
-프로젝트와 Pub Cache를 같은 드라이브로 맞춤.
-
-현재 권장:
-
-```text
-D:\my_portfolio\Date-Pdf
-D:\PubCache
-```
-
----
-
-# 47. 과거 오류 — Invalid depfile
-
-```text
-Invalid depfile
-.dart_tool\flutter_build\...\kernel_snapshot_program.d
-```
-
-해결:
-
-```powershell
-flutter clean
-Remove-Item -Recurse -Force .dart_tool -ErrorAction SilentlyContinue
-Remove-Item -Recurse -Force build -ErrorAction SilentlyContinue
-flutter pub get
-```
-
----
-
-# 48. 과거 오류 — LocaleDataException
-
-```text
-LocaleDataException
-```
-
-해결:
-
-```dart
-await initializeDateFormatting('ko_KR', null);
-```
-
----
-
-# 49. 제목 분석의 현재 구조
-
-제목 분석은 일반 사용자 화면에서 매번 실행하지 않고, 관리자가 PDF를 등록하거나 제목 카탈로그를 갱신할 때만 실행합니다. 레이아웃 기반 후보 추출과 한글 Google ML Kit OCR을 함께 사용하고, 후보 점수와 confidence를 계산하여 관리자가 결과를 검수·수정할 수 있습니다.
-
-```text
-관리자 PDF 등록/카탈로그 갱신
-→ 날짜·본문·구절 사이의 제목 영역 후보 추출
-→ 글자 크기·줄 간격·날짜와의 거리로 후보 점수 계산
-→ 한글 OCR 후보를 읽기 순서와 문맥에 맞게 병합
-→ 제목/신뢰도 저장
-→ 일반 사용자 화면은 저장된 카탈로그만 조회
-```
-
-Firebase 모드에서는 Firestore에 저장하고, NAS 모드에서는 `/api/catalog/current` API에 저장합니다. 현재 분석 버전은 `5`이며, 기존 카탈로그의 버전이 낮으면 관리자 화면에 재분석 안내가 표시됩니다. 제목을 확신할 수 없는 항목은 낮은 confidence로 표시하여 관리자 검수를 유도합니다.
-
-PDF 자동 분석 외에도 관리자 화면에서 날짜별 제목 JSON을 가져올 수 있습니다. JSON 가져오기는 `01-01` 날짜 키 또는 `date`·`title` 배열 항목을 지원하며, 가져온 결과를 확인한 후 저장합니다.
-
----
-
-# 50. GitHub에 올리기 전 반드시 확인할 것
-
-GitHub에 코드를 올리기 전에 비밀정보가 포함되지 않았는지 확인합니다.
-
-절대 커밋하면 안 되는 것:
-
-```text
-.env
-Firebase Admin 서비스 계정 JSON
-firebase-service-account.json
-*.jks
-*.keystore
-android/key.properties
-개인 API Key
-비밀번호
-토큰
-```
-
-특히:
-
-```text
-Firebase 서비스 계정 JSON
-OpenAI API Key
-```
-
-는 절대 GitHub에 올리면 안 됩니다.
-
----
-
-# 51. 권장 .gitignore
-
-프로젝트 루트의:
-
-```text
-.gitignore
-```
-
-에 최소한 다음을 포함하세요.
-
-```gitignore
-# Flutter / Dart
-.dart_tool/
-.packages
-.pub/
-build/
-
-# IDE
-.idea/
-.vscode/
-*.iml
-
-# Android local
-android/local.properties
-android/key.properties
-*.jks
-*.keystore
-
-# iOS generated/local
-ios/Pods/
-ios/.symlinks/
-ios/Flutter/ephemeral/
-
-# Secrets
-.env
-.env.*
-!.env.example
-*service-account*.json
-firebase-service-account*.json
-
-# Python tools / caches if any
-.venv/
-__pycache__/
-*.pyc
-
-# OS
-.DS_Store
-Thumbs.db
-```
-
-주의:
-
-`google-services.json`과 `firebase_options.dart`는 Firebase 클라이언트 설정 파일이며
-서비스 계정 비밀키와는 성격이 다릅니다.
-
-그래도 공개 저장소로 운영할 경우 프로젝트 정책에 맞춰 관리하세요.
-
----
-
-# 52. Git 설치 확인
-
-PowerShell:
-
-```powershell
-git --version
-```
-
-없다면 Git for Windows를 먼저 설치합니다.
-
----
-
-# 53. 현재 프로젝트가 Git 저장소인지 확인
-
-```powershell
-cd D:\my_portfolio\Date-Pdf
-
-git status
-```
-
-정상 Git 저장소라면 상태가 표시됩니다.
-
-아직 Git 저장소가 아니면:
-
-```text
-fatal: not a git repository
-```
-
-가 나옵니다.
-
----
-
-# 54. 이미 GitHub repo가 연결되어 있는지 확인
-
-```powershell
-git remote -v
-```
-
-예:
-
-```text
-origin  https://github.com/USERNAME/Date-Pdf.git (fetch)
-origin  https://github.com/USERNAME/Date-Pdf.git (push)
-```
-
-이렇게 나오면 이미 GitHub repo가 연결된 것입니다.
-
----
-
-# 55. 기존 GitHub repo에 현재 프로젝트 저장
-
-이미 `origin`이 있는 경우 가장 기본적인 순서:
-
-```powershell
-cd D:\my_portfolio\Date-Pdf
-
-git status
-git add .
-git commit -m "Finalize DatePDF v7.1"
-git push
-```
-
-처음 main 브랜치를 push하는 경우:
-
-```powershell
-git push -u origin main
-```
-
----
-
-# 56. 처음 GitHub repo를 만드는 경우
-
-GitHub 웹사이트에서 새 repository를 생성합니다.
-
-권장:
-
-```text
-Repository name:
-Date-Pdf
-```
-
-이미 로컬에 README가 있으므로
-처음 repo를 만들 때 가능하면:
-
-```text
-Add a README
-Add .gitignore
-Add license
-```
-
-를 체크하지 않고 **빈 repo**로 만드는 것이 충돌을 줄이기 쉽습니다.
-
----
-
-# 57. 로컬 프로젝트를 새 GitHub repo에 연결
-
-프로젝트 루트:
-
-```powershell
-cd D:\my_portfolio\Date-Pdf
-```
-
-Git 초기화:
-
-```powershell
-git init
-```
-
-브랜치:
-
-```powershell
-git branch -M main
-```
-
-모든 파일 추가:
-
-```powershell
-git add .
-```
-
-확인:
-
-```powershell
-git status
-```
-
-첫 커밋:
-
-```powershell
-git commit -m "Initial DatePDF project"
-```
-
-GitHub repo 연결:
-
-```powershell
-git remote add origin https://github.com/USERNAME/Date-Pdf.git
-```
-
-Push:
-
-```powershell
-git push -u origin main
-```
-
-`USERNAME`과 repo 이름은 실제 GitHub 주소로 바꿉니다.
-
----
-
-# 58. origin이 이미 있는데 주소가 틀린 경우
-
-확인:
-
-```powershell
-git remote -v
-```
-
-변경:
-
-```powershell
-git remote set-url origin https://github.com/USERNAME/Date-Pdf.git
-```
-
-다시:
-
-```powershell
-git push -u origin main
-```
-
----
-
-# 59. GitHub repo에 이미 README가 있는 경우
-
-GitHub에서 repo를 만들 때 README를 먼저 생성했다면
-로컬과 원격 히스토리가 다를 수 있습니다.
-
-먼저:
-
-```powershell
-git pull --rebase origin main
-```
-
-문제가 없다면:
-
-```powershell
-git push -u origin main
-```
-
-충돌이 생기면 충돌 파일을 직접 정리한 뒤:
-
-```powershell
-git add .
-git rebase --continue
-git push
-```
-
-처음부터 빈 repo를 만드는 것이 가장 편합니다.
-
----
-
-# 60. GitHub 로그인
-
-GitHub는 일반 계정 비밀번호를 Git push 비밀번호처럼 사용하는 방식이 아닙니다.
-
-Git for Windows의 Git Credential Manager가 설치되어 있다면
-`git push` 시 브라우저 로그인 창이 뜰 수 있습니다.
-
-브라우저에서 GitHub 로그인을 완료하면 됩니다.
-
----
-
-# 61. 현재 프로젝트를 GitHub에 올릴 때 권장 순서
-
-실제로는 아래 순서만 기억하면 됩니다.
-
-```powershell
-cd D:\my_portfolio\Date-Pdf
-```
-
-비밀 파일 확인:
-
-```powershell
-git status
-```
-
-.gitignore 확인 후:
-
-```powershell
-git add .
-```
-
-다시 확인:
-
-```powershell
-git status
-```
-
-커밋:
-
-```powershell
-git commit -m "DatePDF final setup"
-```
-
-원격 확인:
-
-```powershell
-git remote -v
-```
-
-Push:
-
-```powershell
-git push
-```
-
----
-
-# 62. 이후 개발할 때 Git 사용
-
-작업 시작:
-
-```powershell
-git pull
-```
-
-코드 수정.
-
-변경 확인:
-
-```powershell
-git status
-```
-
-저장:
-
-```powershell
-git add .
-git commit -m "Improve PDF view statistics"
-git push
-```
-
----
-
-# 63. 커밋 메시지 예시
-
-```text
-Fix PDF local caching
-Update Korean calendar UI
-Add direct-open page statistics
-Remove OCR title extraction
-Clean up admin menu
-Finalize DatePDF v7.1
-```
-
----
-
-# 64. 현재 프로젝트 전체를 안전하게 백업하는 방법
-
-GitHub:
-
-```text
-소스 코드
-설정 파일
-README
-```
-
-백업.
-
-Firebase:
-
-```text
-Firestore 데이터
-Storage PDF
-```
-
-는 별도 클라우드 데이터입니다.
-
-즉 GitHub에 push했다고 해서 Firebase Storage의 PDF와 Firestore 데이터가
-GitHub에 같이 백업되는 것은 아닙니다.
-
-필요하면 Firebase 데이터도 별도로 백업해야 합니다.
-
----
-
-# 65. APK / build 결과는 Git에 올리지 않기
-
-다음은 Git에 올리지 않는 것을 권장합니다.
-
-```text
-build/
-.dart_tool/
-```
-
-APK/AAB 배포 파일이 필요하다면 GitHub Releases나 별도 배포 스토리지를 사용하는 것이 좋습니다.
-
----
-
-# 66. 배포용 Android 빌드
-
-테스트가 끝난 뒤:
-
-```powershell
-flutter build appbundle --release
-```
-
-또는 APK:
-
-```powershell
+flutter analyze
+flutter test
 flutter build apk --release
 ```
 
-릴리스 서명키는 GitHub에 커밋하지 않습니다.
+먼저 실제 휴대폰에 설치하고 앱을 한 번 열어 알림 권한을 허용한다. Firebase Console Firestore에서 `notification_tokens` 문서가 자동 생성되는지 확인한 뒤 Functions 로그와 실제 PDF 업데이트/Q&A 답변으로 푸시를 검증한다. Firebase Cloud Functions는 배포 시 Blaze 요금제가 필요하므로 [Cloud Functions 배포 안내](https://firebase.google.com/docs/functions/manage-functions)와 Firebase 사용량/예산 알림을 확인한다.
 
----
+### Firebase 앱 빌드
 
-# 67. 현재 최종 UI 용어
-
-```text
-오늘의 PDF
-→ 오늘의 말씀
-```
-
-```text
-일정
-→ 찾아보기
-```
-
-```text
-많이 방문한 페이지
-→ 많이 본 말씀
-```
-
-```text
-최근 본 페이지
-→ 최근 본 말씀
-```
-
-개별 제목:
-
-```text
-OCR 제목
-→ 사용하지 않음
-```
-
----
-
-# 68. 최종 데이터 흐름
-
-앱 시작:
-
-```text
-Flutter
-│
-├─ Firebase 초기화
-├─ 한국어 locale 초기화
-├─ 사용자 이름 로드
-├─ PDF 로컬 preload
-└─ 홈 표시
-```
-
-오늘 말씀:
-
-```text
-오늘 날짜
-↓
-DatePageMapper
-↓
-PDF 페이지 계산
-↓
-오늘 말씀 보기 클릭
-↓
-직접 클릭 조회수 +1
-↓
-로컬 캐시 PDF 열기
-↓
-해당 페이지 표시
-```
-
-찾아보기:
-
-```text
-날짜 선택
-↓
-PDF 페이지 계산
-↓
-보기 클릭
-↓
-직접 클릭 조회수 +1
-↓
-PDF 열기
-```
-
-스크롤:
-
-```text
-PDF 내부 스크롤
-↓
-다른 페이지 표시
-↓
-조회수 변화 없음
-```
-
----
-
-# 69. 향후 개발 우선순위
-
-권장 순서:
-
-```text
-1. PDF 관리 실제 구현
-2. 날짜/페이지 관리자 수정 UI
-3. 방문 통계 관리자 화면
-4. QnA Firestore 연결
-5. 관리자 인증 서버화
-6. Firebase Security Rules 정리
-7. PDF 버전 관리
-8. Push Notification
-9. Android 비공개 테스트
-10. iOS TestFlight
-```
-
----
-
-# 70. 최종 체크리스트
-
-새 PC에서:
-
-```text
-[ ] Flutter 설치
-[ ] flutter doctor -v 정상
-[ ] JDK 17 설치
-[ ] JAVA_HOME 정상
-[ ] Android SDK 설치
-[ ] NDK 28.2.13676358 확인
-[ ] D: 프로젝트면 PUB_CACHE를 D:로 설정
-[ ] flutterfire configure
-[ ] Firebase Storage PDF 확인
-[ ] Firestore (default) DB 생성
-[ ] flutter pub get
-[ ] Android 디바이스 확인
-[ ] flutter run
-```
-
-코드:
-
-```text
-[ ] 제목 분석/검수 파일 유지
-[ ] ML Kit 패키지와 Android/iOS 권한 확인
-[ ] admin_title_catalog_page.dart에서 낮은 confidence 검수
-[ ] 관리자 PDF 등록 후 제목 카탈로그 저장 확인
-[ ] 직접 클릭만 조회수 기록
-[ ] PDF 스크롤은 조회수 미기록
-[ ] 찾아보기 한국어 날짜 표시
-```
-
-GitHub:
-
-```text
-[ ] .gitignore 확인
-[ ] API Key 없음
-[ ] 서비스 계정 JSON 없음
-[ ] keystore 없음
-[ ] git status 확인
-[ ] git add .
-[ ] git commit
-[ ] git remote -v
-[ ] git push
-```
-
----
-
-# 71. 현재 최종 상태
-
-```text
-DatePDF v7.1
-
-Flutter Android/iOS
-↓
-Firebase Storage PDF
-↓
-기기 로컬 PDF 캐시
-↓
-날짜별 페이지 자동 이동
-
-Firestore 또는 NAS SQLite/API
-↓
-직접 클릭 조회수
-
-SharedPreferences
-↓
-사용자 이름
-↓
-최근 직접 열어본 말씀
-
-UI
-↓
-오늘의 말씀
-찾아보기
-많이 본 말씀
-최근 본 말씀
-QnA
-관리자 센터
-```
-
-제목 자동 추출은 관리자 작업에서만 실행하며, 일반 사용자 화면에서는 저장된 카탈로그만 읽습니다.
-
----
-
-# 72. 변경 이력
-
-## 2026-09-25 제목 카탈로그·동시 사용·화면 대응 보완
-
-- 제목 카탈로그 JSON 가져오기 및 날짜별 JSON 형식 안내 추가
-- `MM-DD`, `YYYY-MM-DD`, `M월 D일`, 배열형 `date`·`title` 데이터 지원
-- 한글 ML Kit OCR과 제목 후보 점수화 로직 보완
-- 제목 분석 알고리즘 버전 5 적용 및 낮은 confidence 검수 흐름 정리
-- QnA·제목 카탈로그 필터 가로 스크롤과 다이얼로그 내부 스크롤 적용
-- 긴 제목·파일명·답변·관리자 안내 문구의 기기별 레이아웃 대응
-- NAS 조회수 이벤트 중복 방지, 재시도 대기열, SQLite WAL 저장 반영
-- iOS Xcode 실행 절차 추가
-
-## 2026-09-23 ~ 2026-09-24 개발 정리
-
-- Flutter UI 구성
-- 날짜 → PDF 페이지 자동 계산
-- Firebase 연결
-- Firebase Storage PDF 업로드 및 읽기
-- `pdfrx` 실제 PDF Viewer 적용
-- PDF 로컬 캐시 추가
-- 한국어 날짜 초기화
-- 한국어 CalendarDatePicker 적용
-- JDK 17 환경 구성
-- NDK 28.2.13676358 문제 해결
-- C:/D: Kotlin cache 충돌 해결
-- Pub Cache D: 이동
-- Firestore `(default)` 데이터베이스 필요 확인
-- 제목 OCR 방식 테스트
-- 손글씨/혼합 폰트 제목 인식 한계 확인
-- 레이아웃 기반 제목 자동 추출과 관리자 검수 화면 추가
-- 사용자 UI를 `오늘의 말씀` 중심으로 단순화
-- `일정` → `찾아보기`
-- `많이 방문한 페이지` → `많이 본 말씀`
-- `최근 본 페이지` → `최근 본 말씀`
-- 직접 클릭 조회수 정책 적용
-- PDF 내부 스크롤 조회수 제외
-- 관리자 제목 카탈로그/OCR 메뉴 유지 및 검수 흐름 문서화
-- 최종 GitHub 백업/업로드 절차 문서화
-
----
-
-# 73. 핵심 원칙
-
-이 프로젝트의 최종 원칙은 다음과 같습니다.
-
-```text
-복잡한 OCR보다 안정적인 날짜 매핑
-네트워크 PDF보다 로컬 캐시
-페이지 노출보다 직접 클릭 통계
-기술적인 페이지 번호보다 사용자 친화적인 날짜/말씀 UI
-비밀키는 GitHub에 저장하지 않기
-```
-
-이 문서를 현재 프로젝트의 최종 기준 README로 사용합니다.
-
----
-
-# 74. NAS 백엔드 지원 (최신 추가)
-
-Firebase를 계속 사용할 수도 있고, 같은 앱을 NAS의 HTTP/HTTPS API로 실행할 수도 있습니다.
-앱을 다시 빌드할 때 `DATEPDF_BACKEND`만 바꾸면 됩니다. 기본값은 `firebase`입니다.
-
-```text
-Firebase 모드 (기본)
-Flutter → Firebase Storage / Firestore
-
-NAS 모드
-Flutter → NAS HTTPS API → NAS 파일/데이터베이스
-```
-
-Flutter 앱에서 SMB 공유 폴더를 직접 마운트하는 방식은 Android/iOS 권한과 네트워크 정책 차이가 커서 사용하지 않습니다. NAS에는 작은 HTTP API를 두고 PDF, 제목 카탈로그, 조회수, QnA, 설정을 같은 계약으로 제공하는 방식이 안정적입니다.
-
-## 74.1 NAS 모드 실행 설정
+PC에서 프로젝트 폴더의 PowerShell을 열고 실행한다.
 
 ```powershell
-flutter pub get
-
-flutter run `
-  --dart-define=DATEPDF_BACKEND=nas `
-  --dart-define=DATEPDF_NAS_BASE_URL=https://nas.example.com/datepdf `
-  --dart-define=DATEPDF_NAS_TOKEN=change-me
-```
-
-빌드할 때도 같은 값을 지정합니다.
-
-```powershell
-flutter build apk --release `
-  --dart-define=DATEPDF_BACKEND=nas `
-  --dart-define=DATEPDF_NAS_BASE_URL=https://nas.example.com/datepdf `
-  --dart-define=DATEPDF_NAS_TOKEN=change-me
-```
-
-관련 코드:
-
-```text
-lib/services/backend_config.dart
-lib/services/nas_api_client.dart
-python/nas_api.py
-python/nas_requirements.txt
-python/Dockerfile.nas
-```
-
-토큰과 NAS 주소를 Dart 소스에 직접 적지 않습니다. HTTPS와 만료 가능한 토큰 또는 NAS 앞단의 reverse proxy 인증을 사용합니다.
-
-## 74.2 NAS 파일 구조 권장안
-
-```text
-/srv/datepdf/
-├── data/
-│   ├── current.pdf
-│   ├── pdf_metadata.json
-│   ├── catalog.json
-│   ├── settings.json
-│   ├── qna.json
-│   ├── stats.json
-│   └── datepdf.sqlite3
-└── backups/
-    ├── 2026-09-24-current.pdf
-    └── 2026-09-24-catalog.json
-```
-
-PDF 교체는 임시 파일에 업로드한 뒤 검증하고 `current.pdf`를 원자적으로 교체합니다. 기존 PDF와 catalog.json은 날짜별로 백업합니다. 조회수와 QnA는 `datepdf.sqlite3`에 저장하며, SQLite WAL과 busy timeout을 사용해 여러 기기의 동시 요청을 처리합니다.
-
-## 74.2.1 제공되는 NAS 서버 실행 방법
-
-저장소에 포함된 `python/nas_api.py`는 JSON 파일과 SQLite를 함께 사용하는 FastAPI 서버입니다. 기존 `qna.json`·`stats.json`이 있으면 첫 실행 시 SQLite로 마이그레이션하며, Synology/QNAP의 Docker 또는 Python 3.10 이상 환경에서 실행할 수 있습니다.
-
-```powershell
-cd python
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r nas_requirements.txt
-$env:DATEPDF_NAS_ROOT = "D:\\datepdf-nas"
-$env:DATEPDF_NAS_TOKEN = "긴-관리-토큰"
-python nas_api.py
-```
-
-Docker를 지원하는 NAS에서는 다음처럼 데이터 폴더를 영속 볼륨으로 연결할 수 있습니다.
-
-```bash
-cd python
-docker build -f Dockerfile.nas -t datepdf-nas .
-docker run -d --name datepdf-nas --restart unless-stopped \
-  -p 8787:8787 \
-  -v /volume1/datepdf:/data \
-  -e DATEPDF_NAS_TOKEN='긴-관리-토큰' \
-  datepdf-nas
-```
-
-Linux/NAS에서는 다음처럼 실행합니다.
-
-```bash
-cd python
-python3 -m venv .venv
-. .venv/bin/activate
-pip install -r nas_requirements.txt
-export DATEPDF_NAS_ROOT=/srv/datepdf
-export DATEPDF_NAS_TOKEN='긴-관리-토큰'
-python nas_api.py
-```
-
-`DATEPDF_NAS_ROOT` 아래에 `data/`와 `backups/`가 자동으로 만들어집니다. 서버 앞에 HTTPS reverse proxy를 두고, 앱의 `DATEPDF_NAS_BASE_URL`에는 reverse proxy의 `/datepdf` 주소를 넣습니다. 토큰을 비워 두면 인증이 꺼지므로 테스트 환경에서만 사용합니다.
-
-## 74.3 NAS API 계약
-
-모든 경로는 `DATEPDF_NAS_BASE_URL`을 기준으로 합니다. 인증이 필요한 요청은 다음 헤더를 사용합니다.
-
-```http
-Authorization: Bearer <DATEPDF_NAS_TOKEN>
-```
-
-### PDF
-
-```http
-GET /api/pdf/current
-GET /api/pdf/current/metadata
-POST /api/pdf/current       multipart field: file
-```
-
-`GET /api/pdf/current`는 `application/pdf` 바이너리를 반환합니다. JSON을 반환하는 경우에는 다음처럼 다운로드 주소를 포함할 수 있습니다.
-
-```json
-{
-  "downloadUrl": "https://nas.example.com/datepdf/files/current.pdf",
-  "fileName": "365일 매일묵상말씀.pdf",
-  "version": "2026-09-24T10:00:00Z"
-}
-```
-
-`GET /api/pdf/current/metadata` 응답:
-
-```json
-{
-  "fileName": "365일 매일묵상말씀.pdf",
-  "fileSize": 12345678,
-  "updatedAt": "2026-09-24T10:00:00Z"
-}
-```
-
-### 제목 카탈로그
-
-```http
-GET /api/catalog/current
-PUT /api/catalog/current
-```
-
-응답과 저장 형식은 Firebase의 `pdf_catalog/current`와 동일하게 유지합니다.
-
-```json
-{
-  "year": 2026,
-  "startPage": 4,
-  "pageCount": 365,
-  "titleAlgorithmVersion": 5,
-  "titles": {
-    "01-02": "고난을 통과하면서",
-    "01-20": "근심과 불안으로부터 소망이 필요할 때",
-    "09-13": "움직임을 가질 때",
-    "10-27": "하나님의 뜻을 행하는 자"
-  },
-  "confidences": {
-    "01-02": 0.97,
-    "01-20": 0.91
-  },
-  "lowConfidenceKeys": []
-}
-```
-
-제목 분석은 관리자 작업에서만 수행합니다. 일반 사용자는 저장된 카탈로그만 읽습니다.
-`titleAlgorithmVersion`이 앱의 현재 버전보다 낮으면 관리자 화면에 재분석 경고가 표시됩니다. 자동 분석 결과는 관리자가 확인하고 저장해야 하며, JSON 가져오기도 확인 후 저장할 때만 기존 카탈로그를 교체합니다.
-
-관리자 화면에서 불러올 수 있는 최소 JSON 형식은 다음과 같습니다.
-
-```json
-{
-  "year": 2026,
-  "titles": {
-    "01-01": "새해의 소망",
-    "01-02": "믿음의 길"
-  }
-}
-```
-
-### 조회수
-
-```http
-POST /api/stats/direct-open
-GET /api/stats/top?limit=10
-```
-
-직접 PDF에 진입할 때의 요청:
-
-```json
-{
-  "page": 269,
-  "count": 1,
-  "eventId": "unique-client-event-id",
-  "openedAt": "2026-09-24T10:00:00Z"
-}
-```
-
-Top 응답:
-
-```json
-{
-  "items": [
-    {"page": 269, "views": 12},
-    {"page": 8, "views": 9}
-  ]
-}
-```
-
-서버는 `page`를 기본 키로 두고 증가 연산을 원자적으로 처리해야 합니다. `eventId`가 같은 요청은 한 번만 반영해야 네트워크 재시도 때 조회수가 중복 증가하지 않습니다. 앱은 네트워크가 끊겨도 로컬 조회수를 먼저 표시하고, NAS 연결이 복구되면 대기 중인 요청을 재시도합니다.
-
-### 날짜/페이지 설정
-
-```http
-GET /api/settings/pdf
-PUT /api/settings/pdf
-```
-
-```json
-{
-  "dailyStartPdfPage": 4,
-  "dailyPageCount": 365,
-  "pdfFileName": "365일 매일묵상말씀.pdf",
-  "updatedAt": "2026-09-24T10:00:00Z"
-}
-```
-
-### QnA
-
-```http
-GET  /api/qna
-POST /api/qna
-PUT  /api/qna/{id}
-```
-
-질문 객체는 Firebase의 `qna` 문서 필드와 같은 JSON 이름을 사용합니다.
-
-```json
-{
-  "id": "question-id",
-  "title": "질문 제목",
-  "content": "질문 내용",
-  "authorName": "사용자",
-  "createdAt": "2026-09-24T10:00:00Z",
-  "answer": null,
-  "answeredAt": null,
-  "isAnswered": false,
-  "isReadByAdmin": false
-}
-```
-
-NAS 모드의 QnA 스트림은 30초 polling 방식입니다. 실시간 WebSocket이 필요하면 이 API 뒤에 WebSocket/SSE를 추가하고 `QnaService`만 교체하면 됩니다.
-
-## 74.4 NAS 서버 구현 체크리스트
-
-```text
-[x] `python/nas_api.py` 기본 API 구현
-[x] SQLite WAL 기반 조회수·QnA 저장
-[x] `eventId` 기반 조회수 중복 반영 방지
-[x] 네트워크 실패 시 앱의 조회수·QnA 재전송 대기열
-[x] current.pdf 임시 업로드 후 원자적 교체 구현
-[ ] HTTPS reverse proxy 구성
-[ ] Bearer 토큰 또는 VPN 인증 적용
-[ ] 일별 PDF/catalog 백업
-[ ] CORS 또는 모바일 요청 허용 설정
-[ ] 4xx/5xx 응답에 JSON 오류 메시지 제공
-[ ] PDF 응답 Content-Type: application/pdf
-[ ] 큰 PDF 다운로드 Range 요청 지원 권장
-```
-
-앱은 NAS API의 관리자 인증을 대신하지 않습니다. NAS API에서 읽기와 쓰기 권한을 분리하고, 제목 분석·PDF 업로드·조회수 기록·QnA 답변을 각각 서버에서 검증해야 합니다.
-
-## 74.5 Firebase에서 NAS로 옮기는 순서
-
-```text
-1. Firebase에서 PDF, pdf_catalog/current, pdf_settings/config, qna, page_stats 백업
-2. NAS에 current.pdf와 JSON 데이터 설치
-3. 위 API 계약으로 NAS 서버 구현
-4. GET API를 curl/Postman으로 먼저 검증
-5. DATEPDF_BACKEND=nas로 디버그 앱 실행
-6. 날짜 선택, PDF 열기, 제목 표시, 조회수, QnA를 확인
-7. 관리자 제목 분석을 한 번 실행하고 catalog.json 백업
-8. release APK를 NAS 설정으로 빌드
-```
-
-현재 소스는 Firebase 모드를 기본으로 유지하므로 기존 배포 앱을 중단하지 않고 NAS 모드를 별도 APK로 검증할 수 있습니다.
-
-## 75. Android Studio 테스트 상태와 실제 배포 상태
-
-Android Studio에서 `Run` 또는 `Hot Reload`로 보이는 변경은 현재 연결된 기기의 디버그 프로세스에 적용된 상태입니다. 이 상태 자체가 APK나 GitHub에 저장되는 것은 아닙니다.
-
-```text
-저장된 Dart 소스
-→ flutter run / Hot Reload
-→ 현재 기기의 디버그 앱에 임시 반영
-
-저장된 Dart 소스 + 커밋된 파일
-→ flutter build apk --release
-→ 새 릴리스 APK
-→ GitHub에는 commit된 파일만 업로드
-```
-
-따라서 다음을 구분해야 합니다.
-
-- 파일을 저장하지 않은 편집 내용은 빌드와 GitHub에 포함되지 않습니다.
-- 커밋하지 않은 변경은 GitHub에 포함되지 않습니다.
-- 기기에 남아 있는 SharedPreferences, PDF 캐시, 제목 카탈로그는 새 APK를 설치해도 보통 유지됩니다.
-- 제목 분석 알고리즘을 바꾼 뒤에는 관리자 화면에서 `PDF 전체 365일 제목 분석 다시 실행` 후 저장해야 기존 제목 데이터가 교체됩니다.
-- JSON 제목 파일을 가져온 뒤에도 확인 대화상자에서 내용을 확인하고 불러오기를 눌러야 서버와 다른 기기에 반영됩니다.
-
-릴리스 APK를 새 상태로 확인하려면 프로젝트 루트에서 실행합니다.
-
-```powershell
-flutter clean
+cd D:\my_portfolio\Date-Pdf
 flutter pub get
 flutter build apk --release
 ```
 
-기존 테스트 데이터를 완전히 지우고 확인할 때만 다음을 사용합니다. 앱의 로컬 이름, 최근 기록, PDF 캐시도 삭제됩니다.
+결과물은 `build\app\outputs\flutter-apk\app-release.apk`이다. 직접 설치해 테스트할 때는 이 APK를 휴대폰으로 복사해 설치한다. NAS용 APK도 같은 경로와 파일명을 쓰므로 빌드 직후 결과물을 `datepdf-firebase.apk`처럼 다른 이름으로 복사해 보관한다. 현재 Android release 서명 설정은 개발용 debug 키를 사용한다. Play 스토어 배포 전에는 개인 release keystore와 서명을 별도로 설정해야 한다.
+
+### iPhone 푸시 알림의 최초 설정
+
+사용자가 각자 Firebase 콘솔에 토큰을 입력하는 방식이 아니다. 앱은 알림 권한을 요청하고, APNs 연결이 준비되면 FCM 기기 토큰을 자동으로 받아 `notification_tokens`에 등록한다. 토큰이 바뀌어도 앱의 토큰 갱신 감지기가 새 토큰을 자동 등록한다. 사용자가 해야 하는 일은 iPhone에서 앱 알림을 허용하는 것뿐이다.
+
+단, 앱 개발자가 Apple/Firebase에서 앱 전체에 대해 한 번 설정해야 한다. Firebase 프로젝트에 iOS 앱을 등록하고 고유한 Bundle ID를 정한 다음 `GoogleService-Info.plist`를 `ios/Runner/`에 넣는다. Apple Developer의 해당 App ID에 Push Notifications를 켜고, Xcode의 Runner target에서 **Push Notifications**와 **Background Modes > Remote notifications**를 활성화한다. Apple Developer에서 APNs 인증 키를 만들어 Firebase Console의 `Project settings > Cloud Messaging`에 업로드한다. 현재 저장소에는 `GoogleService-Info.plist`가 없고 Bundle ID가 `com.example.datePdf` 예제 값이며 iOS 푸시 capability도 설정되어 있지 않아, 이 최초 설정 전에는 iPhone 푸시가 동작하지 않는다. NAS용 FCM 중계를 쓰려면 위 설정과 NAS 푸시 중계 절차를 모두 마친다.
+
+### NAS 앱 빌드
+
+1. NAS를 Tailscale에 연결하고 `tailscale serve status`에 나온 HTTPS 주소를 복사한다. 예: `https://datepdf-nas.example.ts.net`. 주소 끝에 `/datepdf`를 붙이지 않는다.
+2. 주소를 실제 Tailscale HTTPS 주소로 바꾸고 PC PowerShell에서 아래 명령을 실행한다. 사용자 토큰은 NAS `.env`의 `DATEPDF_NAS_TOKEN`과 동일한 값이어야 한다. 입력은 화면에 표시되지 않고 PowerShell 명령 기록에도 토큰 자체가 남지 않는다.
 
 ```powershell
-adb uninstall com.example.date_pdf
-flutter install --release
-```
-
-NAS 배포 APK는 `DATEPDF_BACKEND`, `DATEPDF_NAS_BASE_URL`, `DATEPDF_NAS_TOKEN`을 `--dart-define`으로 지정하여 별도로 빌드해야 합니다. GitHub에 올리기 전에는 `git status`, `git diff --cached --check`, `git commit`까지 완료해야 변경 내용이 원격 저장소에 포함됩니다.
-
-## 76. 설정 화면의 사용자 이름과 알림 토글
-
-사용자 이름은 `SharedPreferences`의 `display_name` 키에 저장되며, 저장 직후 설정 화면과 홈 화면에 다시 표시됩니다. PDF 업데이트 알림과 QnA 답변 알림 스위치는 각각 다음 로컬 키에 저장됩니다.
-
-```text
-pdf_notifications_enabled
-qna_notifications_enabled
-```
-
-스위치를 껐다 켜는 설정은 현재 기기별 환경설정입니다. 실제 백그라운드 푸시 알림을 보내려면 Firebase Cloud Messaging 또는 NAS 알림 서버와 Android 13 알림 권한 처리가 추가로 필요합니다. 현재 코드는 토글 상태를 저장하고 이후 알림 발송 기능이 이 설정을 참조할 수 있도록 구성되어 있습니다.
-
-## 77. 기기별 화면 대응과 오늘 말씀 프리뷰
-
-홈 화면의 오늘 말씀 카드에는 현재 날짜에 매핑된 PDF 페이지를 작은 PDF 뷰어로 표시합니다. 프리뷰를 누르면 같은 날짜의 전체 PDF 화면으로 이동하고, 프리뷰를 단순히 노출하는 것만으로는 조회수를 증가시키지 않습니다.
-
-화면 폭이 좁은 기기에서 발생하는 `RenderFlex overflow`를 줄이기 위해 관리자 안내 문구와 QnA 상태 영역은 `Expanded`/`Wrap`으로 배치합니다. 일반 목록의 긴 제목은 화면에 맞춰 줄바꿈 또는 말줄임을 사용하고, 제목 카탈로그 검수 목록에서는 제목 전체를 확인할 수 있도록 내용에 맞춰 줄바꿈합니다. PDF 프리뷰는 고정 높이 영역 안에서 렌더링하여 홈 목록의 세로 레이아웃이 깨지지 않도록 구성했습니다.
-
-## 78. 실기기 설치 직후 종료되는 경우
-
-Release APK는 debug APK와 달리 R8 축소와 release 매니페스트를 사용합니다. 이 프로젝트는 Firebase/NAS/PDF를 네트워크에서 읽으므로 기본 Android 매니페스트에 `android.permission.INTERNET`이 필요합니다. ML Kit 제목 분석의 선택 언어 라이브러리도 release R8에서 누락되지 않도록 `android/app/build.gradle.kts`에 명시적으로 포함합니다.
-
-실기기용 APK는 다음처럼 새로 빌드합니다.
-
-```powershell
-flutter clean
+cd D:\my_portfolio\Date-Pdf
 flutter pub get
-flutter build apk --release
+$SecureUserToken = Read-Host "NAS 사용자 토큰 입력" -AsSecureString
+$DatePdfUserToken = [System.Net.NetworkCredential]::new("", $SecureUserToken).Password
+flutter build apk --release --dart-define=DATEPDF_BACKEND=nas --dart-define=DATEPDF_NAS_BASE_URL=https://datepdf-nas.example.ts.net --dart-define=DATEPDF_NAS_TOKEN=$DatePdfUserToken
+Remove-Variable DatePdfUserToken, SecureUserToken
 ```
 
-앱이 계속 종료되면 Android Studio의 `Logcat`에서 `FATAL EXCEPTION`부터 확인합니다. Firebase 초기화가 실패해도 앱 전체가 종료되지 않도록 로컬 캐시 화면으로 시작하도록 방어했지만, 실제 Firebase/NAS 데이터를 사용하려면 인터넷과 서버 주소가 올바르게 설정되어 있어야 합니다.
+3. 빌드 결과를 `datepdf-nas.apk` 등으로 따로 복사한 뒤 휴대폰에 설치하고 Tailscale을 켠다. 관리자 기능이 필요하면 앱 설정의 관리자 모드에서 NAS `.env`에 저장한 `DATEPDF_NAS_ADMIN_TOKEN`을 입력한다. 관리자 토큰은 빌드 명령에 넣지 않는다. APK에는 사용자 토큰이 포함되므로 APK를 신뢰할 수 없는 사람에게 전달하지 말고, 유출 시 새 사용자 토큰으로 NAS 설정과 APK를 함께 교체한다. Firebase 기본 빌드는 코드 `123456`을 사용하므로 Firebase를 계속 운영할 경우 별도 인증 교체가 필요하다. 설치된 앱을 Firebase/NAS 간 전환할 때는 해당 백엔드로 다시 빌드한 APK를 설치한다.
 
-## 79. PDF 한 페이지 보기와 확대
+앱에서 날짜 선택/PDF 다운로드/오프라인 캐시, 제목 표시, 조회수, Q&A 질문과 관리자 답변·삭제, 일반 사용자 화면에서 작성자 이름 숨김, PDF 교체, 제목 카탈로그 저장을 확인한다. 서버 `/api/pdf/current/metadata`는 PDF 파일 정보와 페이지 수를 제공한다. 제목 자동 분석은 **Python API가 수행하지 않는다**. 관리자 앱의 `제목 카탈로그` 화면이 PDF를 읽고 OCR/레이아웃 분석 후 결과를 NAS 카탈로그에 저장한다. 실제 PDF로 365개 중 성공·저신뢰·실패 개수를 확인하고 낮은 신뢰도는 사람이 검수한다. PDF를 교체한 뒤에는 새 PDF 기준으로 제목 카탈로그도 다시 분석/검수한다.
 
-PDF 상세 화면은 현재 페이지 하나만 표시합니다. 세로로 앞뒤 페이지가 함께 보이지 않으며, 하단의 이전/페이지/다음 조작 바도 제거했습니다. 페이지는 좌우로 밀어서 이동하고, 두 손가락으로 확대하거나 축소할 수 있습니다. 확대 범위는 1배부터 4배까지이며, 화면 상단에는 현재 페이지 번호만 표시됩니다.
+### PDF 및 Q&A 알림 동작
 
-이 화면은 PDF 페이지를 이미지로 렌더링해 표시하므로 기기별 PDF 뷰어 레이아웃 차이를 줄이고, 페이지 단위 프리뷰와 확대 동작을 안정적으로 제공합니다. 홈 화면의 작은 오늘 말씀 프리뷰는 기존 PDF 뷰어를 유지하고, 상세 화면을 열었을 때만 이 한 페이지 전용 뷰어를 사용합니다.
+알림은 휴대폰의 OS 알림 권한과 앱 설정의 PDF/Q&A 알림 스위치가 모두 켜져 있어야 보인다. 앱은 알림을 높은 중요도의 로컬 알림 채널에 표시한다.
+
+| 백엔드 | PDF 업데이트 | 내 질문에 답변 | 백그라운드/앱 종료 |
+| --- | --- | --- | --- |
+| Firebase | 앱이 열려 있으면 Firestore 변경을 감지한다. 배포된 `functions/index.js`의 `notifyOnPdfUpdate`가 등록된 FCM 기기들에도 푸시를 보낸다. | Firestore 변경 감지와 `notifyOnQnaAnswer` FCM 푸시를 쓴다. 질문 작성 시 저장한 해당 기기의 토큰으로만 보낸다. | Cloud Functions가 배포되어 있고 FCM/OS 알림 권한이 정상이라면 푸시 수신이 가능하다. 앱이 열려 있을 때는 앱이 로컬 알림으로 표시한다. 실제 기기별 수신은 배포/FCM 설정 후 확인해야 한다. |
+| NAS | 기본은 앱 실행 중 30초 간격 확인과 로컬 시스템 알림이다. FCM 중계를 설정하면 NAS가 Cloud Function을 호출해 등록된 NAS 앱 기기에 푸시한다. | 기본은 앱 실행 중 30초 간격 확인이다. FCM 중계를 설정하면 답변된 질문을 쓴 기기에 푸시한다. | FCM 중계와 Functions 배포가 완료되면 Firebase 경로로 휴대폰 푸시를 받을 수 있다. 미설정/실패 시 앱이 열려 있는 동안의 30초 확인이 대체 경로다. |
+
+알림 문구는 PDF의 경우 “PDF가 업데이트되었습니다 / 새로운 말씀 PDF를 확인해 보세요”, 답변의 경우 “Q&A 답변이 등록되었습니다”와 답변 일부(최대 80자)다. NAS에서도 앱을 닫은 뒤 휴대폰 푸시를 받으려면 다음 FCM 중계를 한 번 설정한다.
+
+1. `functions/.env.example`을 `functions/.env`로 복사하고 `NAS_PUSH_SECRET`에 BAT에서 만든 중계 비밀값을 입력한다. 이 파일은 Git에 올리지 않는다.
+2. NAS `/volume1/docker/datepdf/.env`에 같은 값을 `DATEPDF_NAS_PUSH_SECRET`으로 넣는다. `DATEPDF_NAS_PUSH_URL`은 비워두지 말고, Firebase Functions 배포가 출력한 `notifyNasEvent` HTTPS 주소를 넣는다.
+3. 저장소 루트에서 `firebase deploy --only functions`를 실행하고, 출력된 `notifyNasEvent` URL을 NAS `.env`의 `DATEPDF_NAS_PUSH_URL`에 설정한다. 갱신된 `python/nas_api.py`와 `python/nas_requirements.txt`를 NAS `/volume1/docker/datepdf/app/`에 복사하고 프로젝트 경로에서 `sudo docker compose up -d --build`를 실행한다. NAS 앱도 NAS URL/사용자 토큰으로 다시 빌드해 설치한다. NAS APK는 FCM을 위해 기존 Firebase 프로젝트 설정을 사용하지만, Q&A/PDF 데이터는 NAS에 둔다.
+4. Firebase Firestore의 `notification_tokens`에 기기의 FCM 토큰이 등록되는지 확인한다. `firestore.nas.rules`는 익명 인증 UID와 문서의 `deviceId`가 일치하는 경우에만 NAS용 토큰 등록/갱신을 허용한다. 앱을 처음 실행하고 알림 권한을 허용하면 등록된다. NAS 관리자 모드에서 PDF 교체 또는 Q&A 답변을 시험하고, 앱이 백그라운드/종료 상태일 때 푸시가 오는지 확인한다. iPhone에서는 APNs 키와 Xcode capability 설정도 필요하다.
+
+Firebase 앱의 백그라운드/종료 푸시도 같은 Cloud Functions에 의존한다. Q&A 새 질문에 대한 관리자 이메일은 `functions/.env`에 SMTP와 수신 주소를 설정한 경우에만 전송된다. 상세 설정은 `functions/README.md`를 따른다. 푸시가 오지 않으면 NAS 로그의 `NAS push relay failed`, Firebase Functions 로그, 알림 권한과 토큰 등록을 확인한다. 중계 미설정 시 NAS 앱이 열려 있을 때의 30초 확인만 동작한다.
+
+### PDF 교체 후 사용자 모드로 돌아가기
+
+관리자가 `관리자 모드 진입 → PDF 교체 → 관리자 모드 해제` 순서로 작업해도 알림은 **PDF 교체가 서버에 반영될 때** 발생하며, 관리자 모드 해제 때 새로 발생하지 않는다. 관리자 기기도 알림 대상에 포함된다. 따라서 PDF 알림 설정과 OS 권한이 켜져 있으면 관리자 화면을 보고 있는 동안 알림이 오거나, 전달이 지연되면 관리자 모드 해제 뒤에 도착할 수 있다. 모드 해제는 이미 발생한 알림을 취소하지 않는다. 관리자가 자기 기기에서 알림을 받지 않으려면 해당 기기의 PDF 알림 설정을 끄면 된다. NAS 모드는 푸시 중계를 설정하지 않았다면 앱이 열려 있을 때 30초 간격으로 변경을 확인한다. PDF 교체 직후 관리자 기기는 캐시를 새로 받으며, 다른 온라인 기기도 푸시 또는 앱 실행 중 변경 확인을 통해 새 PDF를 받는다. 오프라인 기기는 기존 캐시를 읽다가 다시 연결되면 서버의 최신 PDF를 확인한다. PDF 내용이나 페이지 구성이 달라졌으면 제목 카탈로그 분석은 별도로 다시 실행하고 결과를 검수한다. NAS 관리자 모드 종료는 관리자 토큰을 앱 메모리에서 지우며 PDF 파일 자체에는 영향을 주지 않는다.
+
+## Q&A 작성자 표시와 질문 삭제
+
+질문 작성 시 `닉네임` 또는 `익명`을 고른다. 닉네임을 고르면 현재 앱에 저장된 닉네임을 관리자에게 표시하고, 익명을 고르면 작성자 표시는 `익명`으로 저장한다. 일반 사용자의 Q&A 목록과 상세 화면에는 어느 경우에도 작성자 이름을 표시하지 않는다. NAS 모드의 `GET /api/qna` 응답에서도 `authorName`과 FCM 알림 토큰을 제외한다. 작성자 이름을 포함한 관리 목록은 `GET /api/admin/qna`로 분리되어 관리자 토큰이 필요하다. 알림 대상 기기를 구분하기 위한 불투명한 기기 ID는 NAS의 foreground 알림 확인에 사용한다.
+
+관리자 Q&A 화면에서 질문을 열고 `질문 삭제`를 선택하면 확인창을 거쳐 NAS 데이터베이스에서 삭제한다. 삭제와 답변 수정은 관리자 토큰이 있어야 하며 오프라인에서는 사용할 수 없다. 삭제한 항목 복구는 설정된 Hyper Backup 백업에서 수행한다. NAS가 아닌 기존 Firebase 백엔드를 쓰는 경우 앱 화면에서는 작성자를 감추지만, Firestore 문서 접근 자체의 비공개 여부는 Firebase Security Rules 설정에 달려 있다.
+
+## 오프라인 모드
+
+NAS 백엔드 빌드에서는 앱이 NAS API 연결 상태를 확인하고, 연결이 끊기면 화면 상단에 오프라인 안내를 표시한다. PDF, PDF 제목/목록, 설정, 그리고 기기에서 마지막으로 받아 둔 Q&A는 캐시가 있는 범위에서 열람할 수 있다. 캐시는 기기 내부에 저장되므로 앱 데이터 삭제나 앱 재설치, 다른 기기에서는 기존 캐시를 사용할 수 없다.
+
+오프라인에서는 Q&A 질문 등록, 관리자 답변 저장, 읽음 상태 변경을 할 수 없다. 입력 내용을 오프라인 대기열에 넣지 않으며, 재연결 후 자동으로 전송하지 않는다. 따라서 앱이 등록 성공으로 잘못 안내하거나 예전 오프라인 입력이 나중에 뜻하지 않게 서버로 올라가지 않는다. 연결이 회복되면 Q&A 목록은 화면이 활성화된 동안 약 30초 간격으로 다시 받아오며, 질문/답변 버튼이 활성화된다. 질문·답변 저장 도중 연결이 끊긴 경우 오류 안내가 나오고, 저장 여부가 확인되지 않았다면 서버 목록을 새로고침해 중복 제출을 피한다.
+
+NAS API가 응답하면(인증 오류 포함) NAS 연결 자체는 가능한 것으로 판단한다. 잘못된 주소/토큰, 방화벽 차단, NAS 종료처럼 요청에 응답이 오지 않는 경우를 오프라인으로 표시한다. 앱의 백그라운드에서는 운영체제가 주기 확인을 늦추거나 멈출 수 있으므로, 알림/실시간 동기화 보장은 별도 푸시 서비스가 필요하다.
+
+## 7. 백업·복구·운영
+
+`Hyper Backup > + > 데이터 백업 작업 > 로컬 폴더 및 USB`에서 원본 `datepdf-data`와 필요한 DSM 설정을 선택하고 대상 `/volume2/datepdf-backup`을 고른다. 다중 버전, 일일 백업, 보존 정책(예: 30개), 주간 무결성 검사를 설정한다. SQLite WAL 사용 중이므로 파일을 임의로 `cp`하는 대신 Hyper Backup의 파일 백업 또는 API 정지 후 복사/복구를 사용한다. 별도로 주 1회 이상 외장 디스크/원격 NAS/클라우드로 보내고 한 번은 실제 복원 테스트를 한다. API는 PDF 교체 전 사본 최근 20개, JSON별 최근 30개를 `/volume1/datepdf-data/backups`에 보관한다. 같은 풀이라 재해 대비 백업은 아니다. 디스크 SMART 오류, 저장소 풀 성능 저하, 백업 실패, 용량 80% 접근 알림을 DSM에서 켠다.
+
+복구 시 새 볼륨에 공유 폴더를 만든 뒤 Hyper Backup에서 `datepdf-data`를 복원한다. 컨테이너를 중지한 상태에서 복원하고, 데이터 폴더·권한·`.env`를 확인한 뒤 다시 시작한다. `.env`는 백업에 무조건 포함하지 말고 비밀번호 관리자에 두 토큰을 별도로 보관한다. 토큰이 노출되면 `.env` 값을 바꾸고 컨테이너를 재시작한 뒤 앱도 새 사용자 토큰으로 다시 빌드한다.
+
+## 로컬 검증과 현재 한계
+
+### 2026-10-06 재점검
+
+- `flutter analyze --no-pub`, `flutter test`, `python -m pytest python/test_nas_api.py -q` 통과. NAS API 테스트는 잘못된 PDF 업로드가 기존 PDF를 보존하는지, FCM 중계 장애 중에도 Q&A 답변 저장이 완료되는지, 통계 중복 요청이 한 번만 집계되는지 확인한다.
+- 임시 데이터 폴더로 NAS API를 실제 Uvicorn 프로세스로 띄워 인증, 빈 NAS의 PDF 404, PDF 업로드/다운로드, Q&A 권한, 중복 조회 집계를 확인했다. PDF 메타데이터에서 실제 페이지 수를 앱이 읽는 `pdfPageCount` 키로 제공하지 않던 불일치를 수정했다.
+- Android 17(API 37) Pixel 에뮬레이터에서 NAS 릴리스 APK를 설치해 실행했다. 홈 화면, PDF 열기, Q&A 화면, Android 알림 권한 요청을 확인했다. NAS 연결을 끊으면 오프라인 배너가 표시되고 Q&A 작성이 비활성화되며, 캐시 PDF를 계속 읽을 수 있었다.
+- 빌드 APK는 `minSdk 24`(Android 7.0), `targetSdk 36`이고 `arm64-v8a`, `armeabi-v7a`, `x86_64`를 포함한다. 파일 크기는 약 108 MiB다. 이 수치는 패키지 설정으로 판단한 지원 범위이며 실제 휴대폰별 성능/화면 검증은 아니다.
+- 이 실행 환경의 Docker가 없어 Synology Container Manager와 compose 배포는 실제 구동하지 못했다. 로컬 Python API 검증은 저장소의 NAS API를 임시 폴더에서 실행한 모의 환경이며 NAS DSM 권한, reverse proxy/Tailscale, 디스크 장애 복구까지 검증한 것은 아니다.
+- 테스트용 Firebase 설정에서 익명 인증 요청이 `CONFIGURATION_NOT_FOUND`로 거부됐다. 앱은 종료되지 않고 NAS API와 오프라인 캐시로 계속 실행됐지만, 이 프로젝트 설정으로는 FCM 토큰 등록과 실제 푸시를 확인하지 못했다. 새 Firebase 프로젝트에 익명 인증, Firestore 규칙, Android 앱 ID를 올바르게 설정한 뒤 실제 기기에서 PDF/Q&A 푸시를 다시 확인해야 한다.
+- 이 저장소에는 iOS `Podfile`과 `GoogleService-Info.plist`가 없고 Push Notifications/APNs 연결도 구성되지 않았다. Xcode가 없는 Windows 환경이라 iOS 빌드 및 iPhone 푸시는 확인하지 못했다. 프로젝트의 iOS 최소 버전은 15.0이다.
+- 테스트 PDF는 빈 페이지 368장으로 제목 OCR 검증 자료가 아니다. 실제 365일 PDF로 제목 자동 추출 정확도와 저신뢰 결과를 확인해야 한다. Android 빌드에서는 Firebase 플러그인의 Kotlin Gradle Plugin 호환성 경고가 나왔으며 현재 빌드는 성공하지만 향후 Flutter/플러그인 업그레이드 시 재확인이 필요하다.
+
+```powershell
+python -m pip install -r python/nas_requirements.txt httpx pytest
+python -m pytest python/test_nas_api.py -q
+flutter analyze --no-pub
+flutter test
+```
+
+API 통합 테스트는 사용자/관리자 권한, 잘못된 PDF 거부, 정상 PDF 다운로드, 설정, Q&A 답변과 재시도, 조회수 중복 방지를 확인한다. Flutter 테스트는 앱 시작 화면과 제목 JSON 파서를 확인한다. 실제 Synology 장비, 실 PDF 365페이지 OCR 품질, Android 푸시 표시, VPN/방화벽 실접속은 이 작업 공간에서 확인할 수 없으므로 위 체크리스트를 NAS와 휴대폰에서 수행한다. 사용자 토큰은 앱에 포함되며 현재 Q&A 전체 목록을 볼 수 있다. 민감한 Q&A나 불특정 사용자가 있는 서비스에는 사용자별 인증·데이터 분리가 선행돼야 한다.
+
+참고: [DS1825+ 사양](https://www.synology.com/en-global/products/DS1825%2B), [DSM 저장소 풀 생성](https://kb.synology.com/en-id/DSM/help/DSM/StorageManager/storage_pool_create_storage_pool?version=7), [Container Manager 프로젝트](https://kb.synology.com/tr-tr/DSM/help/ContainerManager/docker_project?version=7), [DSM 방화벽](https://kb.synology.com/index.php/en-us/DSM/help/DSM/AdminCenter/connection_security_firewall?version=7), [Synology 백업 전략](https://kb.synology.com/en-af/DSM/tutorial/How_to_back_up_your_Synology_NAS), [Tailscale Synology](https://tailscale.com/docs/integrations/synology), [Tailscale Serve](https://tailscale.com/docs/reference/tailscale-cli/serve).
