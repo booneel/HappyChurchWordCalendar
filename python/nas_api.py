@@ -285,9 +285,12 @@ def pdf_metadata() -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="current.pdf not found")
     stat = PDF.stat()
     metadata = read_json(PDF_META, {})
+    page_count = metadata.get("pageCount")
     return {
         "fileName": metadata.get("fileName") or PDF.name,
         "fileSize": stat.st_size,
+        "pageCount": page_count,
+        "pdfPageCount": page_count,
         "updatedAt": metadata.get("updatedAt")
         or datetime.fromtimestamp(stat.st_mtime, timezone.utc)
         .isoformat()

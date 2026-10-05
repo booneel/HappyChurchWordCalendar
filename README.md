@@ -126,6 +126,68 @@ DSM `제어판 > 보안 > 방화벽`에서 **자기 LAN 대역의 DSM 관리 포
 
 앱은 빌드할 때 연결할 백엔드가 정해진다. `DATEPDF_BACKEND`를 지정하지 않으면 Firebase 빌드가 된다. Firebase 프로젝트 설정은 `android/app/google-services.json` 및 `lib/firebase_options.dart`를 사용한다.
 
+### 새 Firebase 프로젝트 만들기와 앱 연결
+
+먼저 데이터 저장 방식을 정한다.
+
+- **NAS 데이터 + Firebase 푸시:** PDF/Q&A/설정은 NAS에 저장한다. Firebase는 FCM, NAS 푸시 중계 Cloud Function, 기기 토큰 목록에만 쓴다. 이 저장소의 NAS FCM 중계는 Firebase Cloud Functions를 쓰므로 결제 계정을 연결한 Blaze 요금제가 필요하다.
+- **Firebase 데이터 + Firebase 푸시:** Firestore에 Q&A/설정/통계를 저장하고 Cloud Storage에 PDF를 저장한다. 이 저장소의 Firebase PDF 교체 기능에 Cloud Storage가 필요하며, 새 Firebase Storage 버킷 사용에도 Blaze 요금제가 필요하다. Cloud Functions도 Blaze가 필요하다. Blaze는 사용량에 따른 결제이므로 Google Cloud에서 예산 알림을 설정하고 사용량을 확인한다. 예산 알림은 자동 지출 차단 장치가 아니다.
+
+#### 1) 프로젝트와 앱 ID 정하기
+
+1. [Firebase Console](https://console.firebase.google.com/)에서 `프로젝트 추가`를 누르고 새 프로젝트를 만든다. Google Analytics는 선택 사항이다. 프로젝트 ID는 생성 후 바꾸기 어렵기 때문에 용도를 알아볼 수 있게 정한다.
+2. Firebase Console의 프로젝트 설정에서 앱을 등록한다. 현재 프로젝트의 Android `applicationId`는 `com.example.date_pdf`이고 iOS Bundle ID는 `com.example.datePdf`라는 예제 값이다. Android 패키지명은 대소문자까지 정확히 일치해야 하고 Firebase에 등록한 뒤 변경할 수 없으므로, 배포용 고유 ID를 쓰려면 **Firebase 앱 등록 전에** Android `android/app/build.gradle.kts`와 iOS Xcode Runner Bundle ID를 먼저 바꾼다. 지금 값을 유지한다면 각 플랫폼에 위의 현재 값을 그대로 등록한다.
+3. iPhone도 배포할 경우 Apple Developer에서 실제 앱 Bundle ID를 등록하고 그 ID를 Xcode Runner target에도 적용한다. Apple Developer 계정 없이 iOS용 APNs 푸시 설정을 완료할 수 없다.
+
+#### 2) Windows PC에서 FlutterFire 연결
+
+Node.js/npm, Flutter SDK, Android Studio가 설치된 PC에서 PowerShell을 연다. Firebase CLI와 FlutterFire CLI를 한 번 설치하고 로그인한다.
+
+```powershell
+npm install -g firebase-tools
+dart pub global activate flutterfire_cli
+firebase login
+cd D:\my_portfolio\Date-Pdf
+firebase projects:list
+flutterfire configure --project=여기에_새_Firebase_프로젝트_ID
+```
+
+플랫폼 선택 화면에서 사용하는 플랫폼(Android, iOS)을 고른다. 등록 앱이 없으면 CLI가 만들도록 진행한다. CLI는 `lib/firebase_options.dart`, Firebase 연결 정보와 `firebase.json`을 갱신한다. Android 설정 파일 `android/app/google-services.json`이 새 프로젝트의 값인지 확인한다. iOS의 경우 `GoogleService-Info.plist`가 `ios/Runner/`에 있는지 확인하고, 없으면 Firebase Console에서 iOS 앱의 plist를 내려받아 그 위치에 넣는다. `firebase_options.dart` 안의 Project ID와 앱 ID가 새 Firebase 프로젝트 값인지 확인한다. 이 파일들을 예전 프로젝트 값으로 남겨두면 새 프로젝트에 연결되지 않는다.
+
+Functions를 새 프로젝트에 배포하려면 저장소 루트에서 프로젝트 별칭도 지정한다.
+
+```powershell
+firebase use --add
+```
+
+대화형 목록에서 새 프로젝트를 선택하고 `default` 같은 별칭을 지정한다. `firebase use` 출력이 새 프로젝트 ID인지 확인한다. 같은 소스에서 여러 Firebase 프로젝트를 다룰 때는 배포 전에 현재 선택 프로젝트를 반드시 확인한다.
+
+#### 3) Firebase 서비스 설정
+
+1. Firebase Console의 `Firestore Database > 데이터베이스 만들기`에서 데이터베이스를 만든다. NAS 푸시 전용으로 쓸 때도 FCM 기기 토큰을 저장할 Firestore가 필요하다. 위치는 사용자와 NAS/Functions에 가까운 곳으로 정한다. 생성 후 `Rules` 탭에 저장소의 `firestore.nas.rules` 내용을 붙여 넣고 게시한다. 이 규칙은 NAS 푸시 전용이며, 앱의 Firestore 데이터 접근은 전부 차단한다.
+2. Firebase Console의 `Authentication > Sign-in method`에서 `Anonymous` 로그인을 사용 설정한다. NAS 모드 앱은 알림 토큰을 기기에 연결하기 위해 익명 Firebase 로그인을 자동 수행한다. 사용자가 별도 계정을 만들거나 토큰을 직접 입력하지 않는다. 앱을 처음 실행하고 알림 권한을 허용하면 FCM 토큰이 `notification_tokens`에 기록된다. 익명 사용자는 앱 데이터 로그인 용도가 아니라 이 토큰을 해당 기기의 UID에 묶는 용도다.
+3. NAS에서 백그라운드 푸시를 받을 계획이면 `functions/.env.example`을 `functions/.env`로 복사해 `NAS_PUSH_SECRET`을 설정하고, 같은 값을 NAS `.env`의 `DATEPDF_NAS_PUSH_SECRET`에 둔다. `firebase deploy --only functions`를 실행해 `notifyNasEvent` 포함 Functions를 배포하고, 출력된 HTTPS URL을 NAS `.env`의 `DATEPDF_NAS_PUSH_URL`에 넣는다. NAS 코드/요구사항 파일을 복사하고 `sudo docker compose up -d --build`로 재빌드한다. SMTP 값은 관리자 이메일 알림을 쓸 때만 입력한다.
+4. **Firebase를 데이터 백엔드로 쓸 때만:** `Storage > 시작하기`에서 기본 버킷을 만든다. 새 프로젝트의 버킷 이름은 보통 `<프로젝트ID>.firebasestorage.app` 형식이며, `flutterfire configure` 후 `firebase_options.dart`에 새 버킷이 반영됐는지 확인한다. 이 앱은 Storage 파일 `365일 매일묵상말씀.pdf`와 Firestore 문서 `pdf_documents/current`, `pdf_catalog/current`, `pdf_settings/config`, `qna`, `page_stats`를 사용한다.
+
+**보안 주의:** Firestore/Storage를 테스트 모드 규칙으로 공개하지 않는다. NAS 데이터 모드에서는 `firestore.nas.rules`만 사용한다. 이 규칙은 익명 인증된 기기가 자기 UID에 연결된 NAS용 알림 토큰만 쓰도록 허용하고 나머지 Firestore 읽기/쓰기는 거부한다. 따라서 이 규칙을 Firebase 데이터 모드에 적용하면 앱의 Q&A/설정/통계 읽기와 쓰기가 모두 막힌다. Firebase 데이터 모드에는 별도의 사용자 인증, 관리자 권한, Firestore/Storage 규칙이 필요하다. 현재 Firebase 기본 앱의 관리자 코드 `123456`은 서버 인증이 아니며, 공개 배포용 관리자 보안으로 사용할 수 없다.
+
+#### 4) iPhone FCM 설정
+
+Firebase Console에 iOS 앱을 등록한 것만으로 APNs 설정이 끝나지는 않는다. Apple Developer에서 해당 App ID에 Push Notifications를 켜고 APNs 인증 키(.p8)를 만든다. Xcode에서 Runner의 `Push Notifications`와 `Background Modes > Remote notifications`를 활성화하고, APNs 키와 Key ID, Team ID를 Firebase Console `Project settings > Cloud Messaging`에 한 번 업로드한다. 이 설정은 앱 운영자가 한 번 하면 되고, 각 iPhone 사용자가 토큰을 등록하지 않는다. 사용자는 앱을 열어 알림 권한을 허용하면 된다. Firebase Flutter 설정 과정과 Apple 푸시 요구사항은 [FlutterFire 설정 안내](https://firebase.google.com/docs/flutter/setup), [FCM Flutter 시작 안내](https://firebase.google.com/docs/cloud-messaging/flutter/get-started)를 참고한다.
+
+#### 5) 새 설정으로 빌드하고 확인
+
+새 프로젝트에 연결한 다음 앱을 다시 빌드한다. NAS 빌드라면 아래 NAS 빌드 명령도 새 `firebase_options.dart`와 Android/iOS Firebase 설정 파일을 사용한다.
+
+```powershell
+flutter pub get
+flutter analyze
+flutter test
+flutter build apk --release
+```
+
+먼저 실제 휴대폰에 설치하고 앱을 한 번 열어 알림 권한을 허용한다. Firebase Console Firestore에서 `notification_tokens` 문서가 자동 생성되는지 확인한 뒤 Functions 로그와 실제 PDF 업데이트/Q&A 답변으로 푸시를 검증한다. Firebase Cloud Functions는 배포 시 Blaze 요금제가 필요하므로 [Cloud Functions 배포 안내](https://firebase.google.com/docs/functions/manage-functions)와 Firebase 사용량/예산 알림을 확인한다.
+
 ### Firebase 앱 빌드
 
 PC에서 프로젝트 폴더의 PowerShell을 열고 실행한다.
@@ -176,9 +238,13 @@ Remove-Variable DatePdfUserToken, SecureUserToken
 1. `functions/.env.example`을 `functions/.env`로 복사하고 `NAS_PUSH_SECRET`에 BAT에서 만든 중계 비밀값을 입력한다. 이 파일은 Git에 올리지 않는다.
 2. NAS `/volume1/docker/datepdf/.env`에 같은 값을 `DATEPDF_NAS_PUSH_SECRET`으로 넣는다. `DATEPDF_NAS_PUSH_URL`은 비워두지 말고, Firebase Functions 배포가 출력한 `notifyNasEvent` HTTPS 주소를 넣는다.
 3. 저장소 루트에서 `firebase deploy --only functions`를 실행하고, 출력된 `notifyNasEvent` URL을 NAS `.env`의 `DATEPDF_NAS_PUSH_URL`에 설정한다. 갱신된 `python/nas_api.py`와 `python/nas_requirements.txt`를 NAS `/volume1/docker/datepdf/app/`에 복사하고 프로젝트 경로에서 `sudo docker compose up -d --build`를 실행한다. NAS 앱도 NAS URL/사용자 토큰으로 다시 빌드해 설치한다. NAS APK는 FCM을 위해 기존 Firebase 프로젝트 설정을 사용하지만, Q&A/PDF 데이터는 NAS에 둔다.
-4. Firebase Firestore의 `notification_tokens`에 앱 기기의 FCM 토큰이 등록되는지 확인한다. Firebase 보안 규칙은 앱이 자기 토큰 문서를 등록/갱신하도록 허용해야 한다. 기기 알림 권한을 허용한 후 앱을 한 번 열어 토큰 등록을 마치고, 앱을 닫은 상태에서 PDF 교체와 테스트 답변 푸시를 확인한다. iPhone에서는 Firebase 콘솔에 APNs 인증 키도 등록해야 한다.
+4. Firebase Firestore의 `notification_tokens`에 기기의 FCM 토큰이 등록되는지 확인한다. `firestore.nas.rules`는 익명 인증 UID와 문서의 `deviceId`가 일치하는 경우에만 NAS용 토큰 등록/갱신을 허용한다. 앱을 처음 실행하고 알림 권한을 허용하면 등록된다. NAS 관리자 모드에서 PDF 교체 또는 Q&A 답변을 시험하고, 앱이 백그라운드/종료 상태일 때 푸시가 오는지 확인한다. iPhone에서는 APNs 키와 Xcode capability 설정도 필요하다.
 
 Firebase 앱의 백그라운드/종료 푸시도 같은 Cloud Functions에 의존한다. Q&A 새 질문에 대한 관리자 이메일은 `functions/.env`에 SMTP와 수신 주소를 설정한 경우에만 전송된다. 상세 설정은 `functions/README.md`를 따른다. 푸시가 오지 않으면 NAS 로그의 `NAS push relay failed`, Firebase Functions 로그, 알림 권한과 토큰 등록을 확인한다. 중계 미설정 시 NAS 앱이 열려 있을 때의 30초 확인만 동작한다.
+
+### PDF 교체 후 사용자 모드로 돌아가기
+
+관리자가 `관리자 모드 진입 → PDF 교체 → 관리자 모드 해제` 순서로 작업해도 알림은 **PDF 교체가 서버에 반영될 때** 발생하며, 관리자 모드 해제 때 새로 발생하지 않는다. 관리자 기기도 알림 대상에 포함된다. 따라서 PDF 알림 설정과 OS 권한이 켜져 있으면 관리자 화면을 보고 있는 동안 알림이 오거나, 전달이 지연되면 관리자 모드 해제 뒤에 도착할 수 있다. 모드 해제는 이미 발생한 알림을 취소하지 않는다. 관리자가 자기 기기에서 알림을 받지 않으려면 해당 기기의 PDF 알림 설정을 끄면 된다. NAS 모드는 푸시 중계를 설정하지 않았다면 앱이 열려 있을 때 30초 간격으로 변경을 확인한다. PDF 교체 직후 관리자 기기는 캐시를 새로 받으며, 다른 온라인 기기도 푸시 또는 앱 실행 중 변경 확인을 통해 새 PDF를 받는다. 오프라인 기기는 기존 캐시를 읽다가 다시 연결되면 서버의 최신 PDF를 확인한다. PDF 내용이나 페이지 구성이 달라졌으면 제목 카탈로그 분석은 별도로 다시 실행하고 결과를 검수한다. NAS 관리자 모드 종료는 관리자 토큰을 앱 메모리에서 지우며 PDF 파일 자체에는 영향을 주지 않는다.
 
 ## Q&A 작성자 표시와 질문 삭제
 
@@ -201,6 +267,17 @@ NAS API가 응답하면(인증 오류 포함) NAS 연결 자체는 가능한 것
 복구 시 새 볼륨에 공유 폴더를 만든 뒤 Hyper Backup에서 `datepdf-data`를 복원한다. 컨테이너를 중지한 상태에서 복원하고, 데이터 폴더·권한·`.env`를 확인한 뒤 다시 시작한다. `.env`는 백업에 무조건 포함하지 말고 비밀번호 관리자에 두 토큰을 별도로 보관한다. 토큰이 노출되면 `.env` 값을 바꾸고 컨테이너를 재시작한 뒤 앱도 새 사용자 토큰으로 다시 빌드한다.
 
 ## 로컬 검증과 현재 한계
+
+### 2026-10-06 재점검
+
+- `flutter analyze --no-pub`, `flutter test`, `python -m pytest python/test_nas_api.py -q` 통과. NAS API 테스트는 잘못된 PDF 업로드가 기존 PDF를 보존하는지, FCM 중계 장애 중에도 Q&A 답변 저장이 완료되는지, 통계 중복 요청이 한 번만 집계되는지 확인한다.
+- 임시 데이터 폴더로 NAS API를 실제 Uvicorn 프로세스로 띄워 인증, 빈 NAS의 PDF 404, PDF 업로드/다운로드, Q&A 권한, 중복 조회 집계를 확인했다. PDF 메타데이터에서 실제 페이지 수를 앱이 읽는 `pdfPageCount` 키로 제공하지 않던 불일치를 수정했다.
+- Android 17(API 37) Pixel 에뮬레이터에서 NAS 릴리스 APK를 설치해 실행했다. 홈 화면, PDF 열기, Q&A 화면, Android 알림 권한 요청을 확인했다. NAS 연결을 끊으면 오프라인 배너가 표시되고 Q&A 작성이 비활성화되며, 캐시 PDF를 계속 읽을 수 있었다.
+- 빌드 APK는 `minSdk 24`(Android 7.0), `targetSdk 36`이고 `arm64-v8a`, `armeabi-v7a`, `x86_64`를 포함한다. 파일 크기는 약 108 MiB다. 이 수치는 패키지 설정으로 판단한 지원 범위이며 실제 휴대폰별 성능/화면 검증은 아니다.
+- 이 실행 환경의 Docker가 없어 Synology Container Manager와 compose 배포는 실제 구동하지 못했다. 로컬 Python API 검증은 저장소의 NAS API를 임시 폴더에서 실행한 모의 환경이며 NAS DSM 권한, reverse proxy/Tailscale, 디스크 장애 복구까지 검증한 것은 아니다.
+- 테스트용 Firebase 설정에서 익명 인증 요청이 `CONFIGURATION_NOT_FOUND`로 거부됐다. 앱은 종료되지 않고 NAS API와 오프라인 캐시로 계속 실행됐지만, 이 프로젝트 설정으로는 FCM 토큰 등록과 실제 푸시를 확인하지 못했다. 새 Firebase 프로젝트에 익명 인증, Firestore 규칙, Android 앱 ID를 올바르게 설정한 뒤 실제 기기에서 PDF/Q&A 푸시를 다시 확인해야 한다.
+- 이 저장소에는 iOS `Podfile`과 `GoogleService-Info.plist`가 없고 Push Notifications/APNs 연결도 구성되지 않았다. Xcode가 없는 Windows 환경이라 iOS 빌드 및 iPhone 푸시는 확인하지 못했다. 프로젝트의 iOS 최소 버전은 15.0이다.
+- 테스트 PDF는 빈 페이지 368장으로 제목 OCR 검증 자료가 아니다. 실제 365일 PDF로 제목 자동 추출 정확도와 저신뢰 결과를 확인해야 한다. Android 빌드에서는 Firebase 플러그인의 Kotlin Gradle Plugin 호환성 경고가 나왔으며 현재 빌드는 성공하지만 향후 Flutter/플러그인 업그레이드 시 재확인이 필요하다.
 
 ```powershell
 python -m pip install -r python/nas_requirements.txt httpx pytest

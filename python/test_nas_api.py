@@ -45,9 +45,19 @@ def test_nas_api_end_to_end(tmp_path, monkeypatch):
         uploaded = client.post("/api/pdf/current", headers=admin,
                                files={"file": ("test.pdf", pdf.getvalue(), "application/pdf")})
         assert uploaded.status_code == 200
+        assert uploaded.json()["pdfPageCount"] == 1
         assert push_events[-1] == {"type": "pdf_update"}
         assert client.get("/api/pdf/current", headers=user).content.startswith(b"%PDF-")
-        assert client.get("/api/pdf/current/metadata", headers=user).json()["fileName"] == "test.pdf"
+        metadata = client.get("/api/pdf/current/metadata", headers=user).json()
+        assert metadata["fileName"] == "test.pdf"
+        assert metadata["pageCount"] == metadata["pdfPageCount"] == 1
+
+        rejected_replacement = client.post(
+            "/api/pdf/current", headers=admin,
+            files={"file": ("bad-replacement.pdf", b"not a pdf", "application/pdf")},
+        )
+        assert rejected_replacement.status_code == 400
+        assert client.get("/api/pdf/current", headers=user).content == pdf.getvalue()
 
         question = client.post("/api/qna", headers=user, json={
             "id": "q1", "title": "질문", "content": "내용", "authorDeviceId": "device",
@@ -86,3 +96,28 @@ def test_nas_api_end_to_end(tmp_path, monkeypatch):
         assert client.post("/api/stats/direct-open", headers=user, json=event).json()["views"] == 1
         assert client.post("/api/stats/direct-open", headers=user, json=event).json()["views"] == 1
         assert client.get("/api/stats/top", headers=user).json()["items"][0]["views"] == 1
+
+
+def test_qna_answer_succeeds_when_push_relay_is_unavailable(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATEPDF_NAS_ROOT", str(tmp_path))
+    monkeypatch.setenv("DATEPDF_NAS_TOKEN", "r" * 48)
+    monkeypatch.setenv("DATEPDF_NAS_ADMIN_TOKEN", "a" * 48)
+    monkeypatch.setenv("DATEPDF_NAS_PUSH_URL", "http://127.0.0.1:1/notify")
+    monkeypatch.setenv("DATEPDF_NAS_PUSH_SECRET", "s" * 48)
+    import nas_api
+
+    api = importlib.reload(nas_api)
+    user = {"Authorization": "Bearer " + "r" * 48}
+    admin = {"Authorization": "Bearer " + "a" * 48}
+    with TestClient(api.app) as client:
+        created = client.post("/api/qna", headers=user, json={
+            "id": "relay-down", "title": "Question", "content": "Answer offline push",
+            "authorDeviceId": "device",
+        })
+        assert created.status_code == 200
+        answered = client.put("/api/qna/relay-down", headers=admin, json={
+            "answer": "The NAS saved this answer.", "isAnswered": True,
+        })
+        assert answered.status_code == 200
+        assert answered.json()["isAnswered"] is True
+        assert client.get("/api/qna", headers=user).json()["items"][0]["answer"] == "The NAS saved this answer."

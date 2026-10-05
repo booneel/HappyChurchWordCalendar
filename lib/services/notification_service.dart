@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
@@ -72,6 +73,14 @@ class NotificationService {
   Future<String> getDeviceId() async {
     if (_deviceId != null) return _deviceId!;
 
+    if (BackendConfig.useNas && Firebase.apps.isNotEmpty) {
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid != null && uid.isNotEmpty) {
+        _deviceId = uid;
+        return uid;
+      }
+    }
+
     final prefs = await SharedPreferences.getInstance();
     _deviceId = prefs.getString(_deviceIdKey);
     if (_deviceId == null || _deviceId!.isEmpty) {
@@ -132,6 +141,10 @@ class NotificationService {
         sound: true,
         provisional: false,
       );
+
+      if (BackendConfig.useNas && FirebaseAuth.instance.currentUser == null) {
+        await FirebaseAuth.instance.signInAnonymously();
+      }
 
       await messaging.setForegroundNotificationPresentationOptions(
         alert: false,
@@ -331,8 +344,17 @@ class NotificationService {
 
       final pdf = await _nas.getJson('/api/pdf/current/metadata');
       final version = '${pdf['updatedAt'] ?? ''}|${pdf['fileSize'] ?? ''}';
-      _pdfVersion ??= prefs.getString('nas_pdf_version') ?? version;
-      if (_pdfVersion != version) {
+      final previousVersion = _pdfVersion ?? prefs.getString('nas_pdf_version');
+      if (previousVersion == null) {
+        // A cached PDF can belong to an earlier backend or may have been used
+        // while the NAS was unavailable during the first app launch. Establish
+        // the baseline silently, and invalidate only if this process has not
+        // already downloaded the current NAS PDF.
+        _pdfVersion = version;
+        if (!PdfCacheService().hasLoadedNasPdfFromServer) {
+          await _invalidatePdfCache();
+        }
+      } else if (previousVersion != version) {
         _pdfVersion = version;
         await _invalidatePdfCache();
         await _showIfEnabled(
