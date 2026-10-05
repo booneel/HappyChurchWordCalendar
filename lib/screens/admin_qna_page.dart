@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../services/backend_config.dart';
+import '../services/nas_api_client.dart';
 import '../services/qna_service.dart';
 
 class AdminQnaPage extends StatefulWidget {
@@ -17,9 +19,10 @@ class _AdminQnaPageState extends State<AdminQnaPage> {
   void _openAnswerDialog(QnaItem item) {
     final answerController = TextEditingController(text: item.answer ?? '');
     final dateFormat = DateFormat('yyyy년 M월 d일 HH:mm', 'ko_KR');
+    final readOnlyOffline =
+        BackendConfig.useNas && !NasApiClient.instance.isServerReachable;
 
-    // 읽음 처리
-    _qnaService.markAsReadByAdmin(item.id);
+    if (!readOnlyOffline) _qnaService.markAsReadByAdmin(item.id);
 
     showDialog<void>(
       context: context,
@@ -83,8 +86,15 @@ class _AdminQnaPageState extends State<AdminQnaPage> {
                   ),
                 ),
                 const SizedBox(height: 6),
+                if (readOnlyOffline)
+                  const Padding(
+                    padding: EdgeInsets.only(bottom: 12),
+                    child: Text(
+                        '오프라인에서는 저장된 Q&A를 읽기만 할 수 있습니다. NAS에 다시 연결되면 답변할 수 있습니다.'),
+                  ),
                 TextField(
                   controller: answerController,
+                  readOnly: readOnlyOffline,
                   minLines: 4,
                   maxLines: 8,
                   maxLength: 500,
@@ -105,29 +115,40 @@ class _AdminQnaPageState extends State<AdminQnaPage> {
             onPressed: () => Navigator.pop(dialogContext),
             child: const Text('취소'),
           ),
-          FilledButton(
-            onPressed: () async {
-              final text = answerController.text.trim();
-              if (text.isEmpty) {
+          if (!readOnlyOffline)
+            FilledButton(
+              onPressed: () async {
+                final text = answerController.text.trim();
+                if (text.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('답변 내용을 입력해 주세요.')),
+                  );
+                  return;
+                }
+
+                try {
+                  await _qnaService.answerQuestion(
+                    questionId: item.id,
+                    answer: text,
+                  );
+                } catch (_) {
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                        content: Text(
+                            'NAS에 연결되지 않아 답변을 저장하지 못했습니다. 다시 연결한 뒤 시도해 주세요.')),
+                  );
+                  return;
+                }
+
+                if (!mounted || !dialogContext.mounted) return;
+                Navigator.pop(dialogContext);
+
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('답변 내용을 입력해 주세요.')),
-                );
-                return;
-              }
-
-              await _qnaService.answerQuestion(
-                questionId: item.id,
-                answer: text,
-              );
-
-              if (!mounted || !dialogContext.mounted) return;
-              Navigator.pop(dialogContext);
-
-              ScaffoldMessenger.of(context)
-                  .showSnackBar(const SnackBar(content: Text('답변이 등록되었습니다.')));
-            },
-            child: const Text('답변 저장'),
-          ),
+                    const SnackBar(content: Text('답변이 등록되었습니다.')));
+              },
+              child: const Text('답변 저장'),
+            ),
         ],
       ),
     ).whenComplete(answerController.dispose);

@@ -48,6 +48,7 @@ def test_nas_api_end_to_end(tmp_path, monkeypatch):
         })
         assert question.status_code == 200
         assert question.json()["isAnswered"] is False
+        assert question.json()["notificationToken"] is None
         assert client.put("/api/qna/q1", headers=user, json={"answer": "답"}).status_code == 403
         answer = client.put("/api/qna/q1", headers=admin, json={
             "answer": "답변", "isAnswered": True, "answeredAt": "2026-10-05T00:00:00Z"

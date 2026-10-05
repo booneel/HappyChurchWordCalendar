@@ -198,8 +198,9 @@ def atomic_json(path: Path, value: Any, backup: bool = False) -> None:
     BACKUPS.mkdir(parents=True, exist_ok=True)
     with WRITE_LOCK:
         if backup and path.exists():
-            backup_path = BACKUPS / f"{path.stem}-{datetime.now().strftime('%Y%m%d-%H%M%S')}.json"
+            backup_path = BACKUPS / f"{path.stem}-{datetime.now().strftime('%Y%m%d-%H%M%S-%f')}.json"
             shutil.copy2(path, backup_path)
+            prune_backups(f"{path.stem}-*.json", keep=30)
         fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
@@ -229,6 +230,13 @@ def backup_pdf() -> None:
     if PDF.exists():
         backup = BACKUPS / f"{datetime.now().strftime('%Y%m%d-%H%M%S-%f')}-current.pdf"
         shutil.copy2(PDF, backup)
+
+
+def prune_backups(pattern: str, *, keep: int) -> None:
+    """Bound same-volume rollback copies; Hyper Backup remains the long-term copy."""
+    paths = sorted(BACKUPS.glob(pattern), key=lambda path: path.stat().st_mtime, reverse=True)
+    for old_path in paths[keep:]:
+        old_path.unlink(missing_ok=True)
 
 
 
@@ -396,6 +404,8 @@ def get_qna() -> dict[str, Any]:
         except json.JSONDecodeError:
             continue
         if isinstance(item, dict):
+            # NAS polling uses authorDeviceId; never return FCM credentials to clients.
+            item.pop("notificationToken", None)
             items.append(item)
     return {"items": items}
 
@@ -407,6 +417,7 @@ def create_qna(payload: QuestionPayload) -> dict[str, Any]:
     item["answeredAt"] = None
     item["isAnswered"] = False
     item["isReadByAdmin"] = False
+    item["notificationToken"] = None
     item["id"] = item["id"] or secrets.token_urlsafe(12)
     item["createdAt"] = item["createdAt"] or utc_now()
     with database() as connection:

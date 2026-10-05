@@ -283,6 +283,7 @@ class NotificationService {
             if (id != null) {
               _qnaAnswers[id] =
                   prefs.getBool('nas_qna_answer_$id') ?? (item['isAnswered'] == true);
+              await prefs.setBool('nas_qna_answer_$id', _qnaAnswers[id]!);
             }
           }
           _qnaLoaded = true;

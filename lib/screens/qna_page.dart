@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../services/backend_config.dart';
 import '../services/local_profile_service.dart';
+import '../services/nas_api_client.dart';
 import '../services/qna_service.dart';
 
 class QnaPage extends StatefulWidget {
@@ -107,18 +109,24 @@ class _QnaPageState extends State<QnaPage> {
     contentController.dispose();
 
     if (result == true) {
-      await _qnaService.createQuestion(
-        title: title,
-        content: content,
-        authorName: name,
-      );
-
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('질문이 성공적으로 등록되었습니다.')));
-
-      setState(() {});
+      try {
+        await _qnaService.createQuestion(
+          title: title,
+          content: content,
+          authorName: name,
+        );
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('질문이 성공적으로 등록되었습니다.')),
+        );
+        setState(() {});
+      } catch (_) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('NAS에 연결되지 않아 질문을 등록하지 못했습니다. 다시 연결한 뒤 시도해 주세요.')),
+        );
+      }
     }
   }
 
@@ -400,11 +408,24 @@ class _QnaPageState extends State<QnaPage> {
                         ),
                     ],
                     const SizedBox(height: 16),
-                    FilledButton.icon(
-                      onPressed: _openAskDialog,
-                      icon: const Icon(Icons.edit_outlined),
-                      label: const Text('질문하기'),
-                    ),
+                    if (!BackendConfig.useNas)
+                      FilledButton.icon(
+                        onPressed: _openAskDialog,
+                        icon: const Icon(Icons.edit_outlined),
+                        label: const Text('질문하기'),
+                      )
+                    else
+                      ValueListenableBuilder<bool?>(
+                        valueListenable: NasApiClient.serverReachability,
+                        builder: (context, reachable, _) => FilledButton.icon(
+                          onPressed: reachable == true ? _openAskDialog : null,
+                          icon: Icon(reachable == true
+                              ? Icons.edit_outlined
+                              : Icons.cloud_off_outlined),
+                          label: Text(
+                              reachable == true ? '질문하기' : 'NAS 연결 후 질문 가능'),
+                        ),
+                      ),
                   ],
                 );
               },

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import 'backend_config.dart';
@@ -20,10 +21,12 @@ class NasApiClient {
 
   static const _requestTimeout = Duration(seconds: 15);
   static const _maxAttempts = 3;
+  static final ValueNotifier<bool?> serverReachability = ValueNotifier(null);
   String? _adminToken;
 
   void setAdminToken(String? value) => _adminToken = value;
   bool get hasAdminToken => _adminToken != null;
+  bool get isServerReachable => serverReachability.value == true;
 
   Uri _uri(String path, [Map<String, String>? query]) {
     final base = BackendConfig.nasBaseUri;
@@ -44,10 +47,17 @@ class NasApiClient {
       };
 
   Future<bool> verifyAdminToken(String candidate) async {
-    final response = await http.get(
-      _uri('/api/admin/check'),
-      headers: {'Authorization': 'Bearer $candidate'},
-    ).timeout(_requestTimeout);
+    late final http.Response response;
+    try {
+      response = await http.get(
+        _uri('/api/admin/check'),
+        headers: {'Authorization': 'Bearer $candidate'},
+      ).timeout(_requestTimeout);
+      serverReachability.value = true;
+    } catch (_) {
+      serverReachability.value = false;
+      rethrow;
+    }
     if (response.statusCode == 200) {
       _adminToken = candidate;
       return true;
@@ -63,6 +73,7 @@ class NasApiClient {
     for (var attempt = 0; attempt < _maxAttempts; attempt++) {
       try {
         final response = await request();
+        serverReachability.value = true;
         if (!_isRetryableStatus(response.statusCode) ||
             attempt == _maxAttempts - 1) {
           return response;
@@ -70,6 +81,7 @@ class NasApiClient {
       } catch (error) {
         lastError = error;
         if (attempt == _maxAttempts - 1 || !_isRetryableError(error)) {
+          serverReachability.value = false;
           rethrow;
         }
       }
@@ -77,6 +89,7 @@ class NasApiClient {
       await Future<void>.delayed(Duration(milliseconds: 300 * (attempt + 1)));
     }
 
+    serverReachability.value = false;
     throw lastError ?? const HttpException('NAS 요청이 실패했습니다.');
   }
 
@@ -181,8 +194,7 @@ class NasApiClient {
       bytes = fileResponse.bodyBytes;
     }
 
-    if (bytes.length < 5 ||
-        String.fromCharCodes(bytes.take(5)) != '%PDF-') {
+    if (bytes.length < 5 || String.fromCharCodes(bytes.take(5)) != '%PDF-') {
       throw const FormatException('NAS PDF 응답이 유효한 PDF가 아닙니다.');
     }
     final temporary = File('${target.path}.download');
@@ -208,8 +220,15 @@ class NasApiClient {
         filename: fileName,
       ),
     );
-    final response = await request.send();
-    final result = await http.Response.fromStream(response);
+    late final http.Response result;
+    try {
+      final response = await request.send();
+      result = await http.Response.fromStream(response);
+      serverReachability.value = true;
+    } catch (_) {
+      serverReachability.value = false;
+      rethrow;
+    }
     _check(result);
     if (result.body.trim().isEmpty) return <String, dynamic>{};
     final decoded = jsonDecode(result.body);
