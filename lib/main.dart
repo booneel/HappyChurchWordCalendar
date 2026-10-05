@@ -6,7 +6,6 @@ import 'package:intl/date_symbol_data_local.dart';
 
 import 'firebase_options.dart';
 import 'screens/app_shell.dart';
-import 'services/backend_config.dart';
 import 'services/notification_service.dart';
 
 @pragma('vm:entry-point')
@@ -36,19 +35,17 @@ Future<void> main() async {
   );
 
   var firebaseReady = false;
-  if (!BackendConfig.useNas) {
-    try {
-      await Firebase.initializeApp(
-        options: DefaultFirebaseOptions.currentPlatform,
-      );
-      firebaseReady = true;
-    } catch (error, stackTrace) {
-      debugPrint('Firebase initialization failed: $error');
-      debugPrintStack(stackTrace: stackTrace);
-      // Firebase 설정/네트워크가 일시적으로 없어도 로컬 캐시 화면은
-      // 실행할 수 있어야 합니다. 각 서비스는 Firebase 앱이 없을 때
-      // 로컬 데이터로 동작하도록 방어되어 있습니다.
-    }
+  try {
+    // NAS 모드에서도 Firebase Cloud Messaging을 push transport로 사용한다.
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+    firebaseReady = true;
+  } catch (error, stackTrace) {
+    debugPrint('Firebase initialization failed: $error');
+    debugPrintStack(stackTrace: stackTrace);
+    // Firebase 설정/네트워크가 일시적으로 없어도 로컬 캐시 화면은
+    // 실행할 수 있어야 합니다. NAS는 foreground polling fallback을 사용합니다.
   }
 
   if (firebaseReady) {

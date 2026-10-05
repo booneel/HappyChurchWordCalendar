@@ -60,8 +60,11 @@ class NotificationService {
     }
 
     if (firebaseEnabled && Firebase.apps.isNotEmpty) {
-      await _initializeFirebaseNotifications();
-    } else if (BackendConfig.useNas) {
+      await _initializeFirebaseNotifications(
+        watchFirestore: !BackendConfig.useNas,
+      );
+    }
+    if (BackendConfig.useNas) {
       _startNasPolling();
     }
   }
@@ -118,7 +121,9 @@ class NotificationService {
     );
   }
 
-  Future<void> _initializeFirebaseNotifications() async {
+  Future<void> _initializeFirebaseNotifications({
+    required bool watchFirestore,
+  }) async {
     try {
       final messaging = FirebaseMessaging.instance;
       await messaging.requestPermission(
@@ -134,9 +139,6 @@ class NotificationService {
         sound: false,
       );
 
-      _fcmToken = await messaging.getToken();
-      await _saveToken(_fcmToken);
-
       _messageSubscription = FirebaseMessaging.onMessage.listen(
         (message) => unawaited(showRemoteMessage(message)),
         onError: (Object error, StackTrace stackTrace) {
@@ -149,7 +151,22 @@ class NotificationService {
         unawaited(_saveToken(token));
       });
 
-      _watchFirestoreChanges();
+      if (defaultTargetPlatform == TargetPlatform.iOS) {
+        String? apnsToken;
+        for (var attempt = 0; attempt < 10; attempt++) {
+          apnsToken = await messaging.getAPNSToken();
+          if (apnsToken != null && apnsToken.isNotEmpty) break;
+          await Future<void>.delayed(const Duration(milliseconds: 500));
+        }
+        if (apnsToken == null || apnsToken.isEmpty) {
+          throw StateError('APNs token is not available yet.');
+        }
+      }
+
+      _fcmToken = await messaging.getToken();
+      await _saveToken(_fcmToken);
+
+      if (watchFirestore) _watchFirestoreChanges();
     } catch (error, stackTrace) {
       // Devices without Google Play services can still use the rest of the app.
       debugPrint('FCM initialization failed: $error');
@@ -169,6 +186,7 @@ class NotificationService {
         'token': token,
         'deviceId': deviceId,
         'platform': defaultTargetPlatform.name,
+        'backend': BackendConfig.useNas ? 'nas' : 'firebase',
         'updatedAt': FieldValue.serverTimestamp(),
       });
     } catch (error) {
@@ -281,8 +299,8 @@ class NotificationService {
           for (final item in snapshot) {
             final id = item['id']?.toString();
             if (id != null) {
-              _qnaAnswers[id] =
-                  prefs.getBool('nas_qna_answer_$id') ?? (item['isAnswered'] == true);
+              _qnaAnswers[id] = prefs.getBool('nas_qna_answer_$id') ??
+                  (item['isAnswered'] == true);
               await prefs.setBool('nas_qna_answer_$id', _qnaAnswers[id]!);
             }
           }
@@ -382,7 +400,10 @@ class NotificationService {
 
     try {
       await _local.show(
-        id: DateTime.now().millisecondsSinceEpoch.remainder(0x7fffffff),
+        // NAS foreground polling and FCM can detect the same change at nearly
+        // the same time. A stable ID makes the second delivery update the
+        // first notification instead of duplicating it in the tray.
+        id: (payload ?? type).hashCode & 0x7fffffff,
         title: title,
         body: body,
         notificationDetails: const NotificationDetails(

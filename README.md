@@ -56,7 +56,36 @@ python python/export_firebase_to_nas.py --service-account C:\secure\firebase-ser
 
 ## 4. 서버 배포
 
-1. 이 저장소의 `deploy/synology/compose.yaml`을 NAS `/volume1/docker/datepdf/compose.yaml`로, `python/Dockerfile.nas`, `python/nas_api.py`, `python/nas_requirements.txt`를 `.../app/`으로 복사한다. 같은 폴더에 있는 `deploy/synology/env.example`을 참고해 `/volume1/docker/datepdf/.env`를 NAS에서 새로 만든다. 두 토큰은 서로 다른 32자 이상의 무작위 값이어야 한다. PC에서 각각 `python -c "import secrets; print(secrets.token_urlsafe(48))"`를 실행해 만든다. 관리자 토큰을 사용자 APK에 넣지 않는다.
+### NAS 토큰 만들기와 배치
+
+토큰은 NAS API가 요청자를 확인하는 비밀번호처럼 동작한다. **사용자 토큰**은 앱의 일반 기능(Q&A 읽기/질문 등록 포함)에 쓰고, **관리자 토큰**은 PDF 교체·설정/제목 수정·Q&A 답변 같은 쓰기 권한을 확인하는 데 쓴다. 두 값은 서로 달라야 한다. 가장 쉬운 방법은 `deploy/synology/generate_tokens.bat`을 실행하는 것이다. Python 3가 없는 PC에서는 아래 명령으로 사용자/관리자 토큰을 각각 생성할 수 있다.
+
+```powershell
+python -c "import secrets; print(secrets.token_urlsafe(48))"
+```
+
+첫 번째 출력은 사용자 토큰, 두 번째 출력은 관리자 토큰으로 비밀번호 관리자에 따로 보관한다. 실제 값을 README, 메신저, Git 저장소에 붙여 넣지 않는다.
+
+NAS File Station에서 `deploy/synology/env.example`을 참고해 `/volume1/docker/datepdf/.env`를 만든다. 파일에는 아래 두 줄을 넣고 각 오른쪽 값을 방금 만든 값으로 바꾼다. 예시 문구 `replace-with-...`를 그대로 두면 서버가 시작되지 않는다.
+
+```dotenv
+DATEPDF_NAS_TOKEN=여기에_사용자_토큰
+DATEPDF_NAS_ADMIN_TOKEN=여기에_관리자_토큰
+```
+
+토큰은 저장소의 `deploy/synology/generate_tokens.bat`을 Windows에서 실행해 만들 수 있다. Python 3가 필요하다. 사용자/관리자 NAS 토큰과 FCM 중계용 비밀값이 한 번에 출력된다. NAS 토큰 두 개는 NAS `.env`에 넣고, FCM 중계를 설정할 때만 `DATEPDF_NAS_PUSH_SECRET`을 NAS `.env`와 `functions/.env`의 `NAS_PUSH_SECRET`에 똑같이 넣는다. 값은 화면에만 출력되므로 안전한 비밀번호 관리자에 보관하고 저장소나 메신저에 올리지 않는다.
+
+`compose.yaml`이 이 `.env`를 컨테이너에 전달한다. 토큰을 바꾼 뒤에는 NAS 프로젝트 폴더에서 `sudo docker compose up -d --force-recreate`를 실행해 컨테이너를 다시 만든다. 실제 `.env`는 NAS에만 두고 Git에 올리지 않는다.
+
+| 토큰 | 사용 위치 | 권한/주의 |
+| --- | --- | --- |
+| `DATEPDF_NAS_TOKEN` 사용자 토큰 | NAS `.env`와 Flutter APK 빌드 명령 | 앱 일반 API 접근용. APK에 포함되므로 APK를 받은 사람이 값을 추출할 수 있다. 모든 앱 설치가 같은 값을 공유한다. |
+| `DATEPDF_NAS_ADMIN_TOKEN` 관리자 토큰 | NAS `.env`와 앱 관리자 코드 입력 화면 | 관리자 API 전용. **APK 빌드 명령에 넣지 않는다.** 관리자 기기에서 관리자 모드에 들어갈 때 직접 입력하며 앱을 다시 시작하면 재입력한다. |
+| `DATEPDF_NAS_PUSH_SECRET` 중계 비밀값 | NAS `.env`와 `functions/.env`의 `NAS_PUSH_SECRET` | NAS 서버와 Cloud Function 사이의 인증용. 앱 빌드에 넣지 않는다. |
+
+사용자 토큰이 노출되면 NAS `.env`의 사용자 토큰을 새 값으로 바꾸고 컨테이너를 재시작한 다음, 새 사용자 토큰으로 APK를 다시 빌드해 사용자 기기에 배포한다. 관리자 토큰이 노출되면 관리자 토큰만 새 값으로 바꾸고 컨테이너를 재시작한 뒤 관리자 기기에서 새 토큰을 입력한다. 토큰은 VPN/Tailscale과 HTTPS를 대신하지 않는다.
+
+1. 이 저장소의 `deploy/synology/compose.yaml`을 NAS `/volume1/docker/datepdf/compose.yaml`로, `python/Dockerfile.nas`, `python/nas_api.py`, `python/nas_requirements.txt`를 `.../app/`으로 복사한다. 토큰은 위의 **NAS 토큰 만들기와 배치** 절차대로 NAS `.env`에 설정한다.
 2. SSH에서 `sudo chmod 600 /volume1/docker/datepdf/.env`를 실행한다. 프로젝트와 데이터 폴더는 관리자 외의 계정이 읽거나 수정하지 못하도록 DSM 공유 폴더 권한을 확인한다. 초기 PDF/JSON도 컨테이너에서 읽을 수 있어야 한다.
 3. `Container Manager > 프로젝트 > 생성`에서 프로젝트명 `datepdf`, 경로 `/volume1/docker/datepdf`, `compose.yaml` 사용을 선택한다. 이미지를 빌드하고 프로젝트를 시작한다. CLI를 쓰면 해당 폴더에서 `sudo docker compose up -d --build`를 실행한다. `sudo docker compose logs --tail=100 datepdf-api`로 오류가 없는지 확인한다.
 4. 호스트 포트는 `127.0.0.1:8787`에만 열린다. NAS SSH에서 아래처럼 확인한다. Windows에서는 `curl.exe`를 사용한다.
@@ -95,17 +124,67 @@ DSM `제어판 > 보안 > 방화벽`에서 **자기 LAN 대역의 DSM 관리 포
 
 ## 6. 앱 빌드와 확인
 
-Tailscale Serve HTTPS 주소와 `.env`의 **사용자 토큰**으로 PC에서 빌드한다. 주소 끝에 `/datepdf`를 붙이지 않는다. 관리자 화면에 들어갈 때만 NAS `.env`의 **관리자 토큰**을 입력한다. NAS 관리자 토큰은 앱 메모리에만 보관되고 앱 재시작 뒤 다시 입력한다. 현재 Firebase 기본 빌드는 코드 `123456`을 사용하므로 Firebase를 계속 운영할 경우 별도 인증 교체가 필요하다.
+앱은 빌드할 때 연결할 백엔드가 정해진다. `DATEPDF_BACKEND`를 지정하지 않으면 Firebase 빌드가 된다. Firebase 프로젝트 설정은 `android/app/google-services.json` 및 `lib/firebase_options.dart`를 사용한다.
+
+### Firebase 앱 빌드
+
+PC에서 프로젝트 폴더의 PowerShell을 열고 실행한다.
 
 ```powershell
 cd D:\my_portfolio\Date-Pdf
 flutter pub get
-flutter build apk --release --dart-define=DATEPDF_BACKEND=nas --dart-define=DATEPDF_NAS_BASE_URL=https://NAS이름.도메인.ts.net --dart-define=DATEPDF_NAS_TOKEN=<USER_TOKEN>
+flutter build apk --release
 ```
 
-`build\app\outputs\flutter-apk\app-release.apk`를 휴대폰에 설치하고 Tailscale을 켠다. 날짜 선택/PDF 다운로드/오프라인 캐시, 제목 표시, 조회수, Q&A 질문과 관리자 답변, PDF 교체, 제목 카탈로그 저장을 확인한다. 서버 `/api/pdf/current/metadata`는 PDF 파일 정보와 페이지 수를 제공한다. 제목 자동 분석은 **Python API가 수행하지 않는다**. 관리자 앱의 `제목 카탈로그` 화면이 PDF를 읽고 OCR/레이아웃 분석 후 결과를 NAS 카탈로그에 저장한다. 실제 PDF로 365개 중 성공·저신뢰·실패 개수를 확인하고 낮은 신뢰도는 사람이 검수한다. PDF를 교체한 뒤에는 새 PDF 기준으로 제목 카탈로그도 다시 분석/검수한다.
+결과물은 `build\app\outputs\flutter-apk\app-release.apk`이다. 직접 설치해 테스트할 때는 이 APK를 휴대폰으로 복사해 설치한다. NAS용 APK도 같은 경로와 파일명을 쓰므로 빌드 직후 결과물을 `datepdf-firebase.apk`처럼 다른 이름으로 복사해 보관한다. 현재 Android release 서명 설정은 개발용 debug 키를 사용한다. Play 스토어 배포 전에는 개인 release keystore와 서명을 별도로 설정해야 한다.
 
-NAS 알림은 앱이 foreground에서 실행 중일 때 30초마다 PDF 메타데이터와 Q&A 변경을 확인해 로컬 알림을 표시한다. Android/iOS는 백그라운드에서 앱 타이머 실행을 늦추거나 중단할 수 있어 전달 시점을 보장할 수 없고, 앱이 완전히 종료된 상태의 즉시 푸시는 구현되어 있지 않다. 휴대폰의 알림 권한과 앱 설정의 PDF/Q&A 알림 스위치를 켜고, 관리자 기기에서 PDF 교체 및 답변을 올린 뒤 다른 기기에서 30초 이상 대기해 확인한다. 완전 종료 상태 푸시가 필요하면 별도의 푸시 서비스와 기기 토큰 등록을 구현해야 한다.
+### iPhone 푸시 알림의 최초 설정
+
+사용자가 각자 Firebase 콘솔에 토큰을 입력하는 방식이 아니다. 앱은 알림 권한을 요청하고, APNs 연결이 준비되면 FCM 기기 토큰을 자동으로 받아 `notification_tokens`에 등록한다. 토큰이 바뀌어도 앱의 토큰 갱신 감지기가 새 토큰을 자동 등록한다. 사용자가 해야 하는 일은 iPhone에서 앱 알림을 허용하는 것뿐이다.
+
+단, 앱 개발자가 Apple/Firebase에서 앱 전체에 대해 한 번 설정해야 한다. Firebase 프로젝트에 iOS 앱을 등록하고 고유한 Bundle ID를 정한 다음 `GoogleService-Info.plist`를 `ios/Runner/`에 넣는다. Apple Developer의 해당 App ID에 Push Notifications를 켜고, Xcode의 Runner target에서 **Push Notifications**와 **Background Modes > Remote notifications**를 활성화한다. Apple Developer에서 APNs 인증 키를 만들어 Firebase Console의 `Project settings > Cloud Messaging`에 업로드한다. 현재 저장소에는 `GoogleService-Info.plist`가 없고 Bundle ID가 `com.example.datePdf` 예제 값이며 iOS 푸시 capability도 설정되어 있지 않아, 이 최초 설정 전에는 iPhone 푸시가 동작하지 않는다. NAS용 FCM 중계를 쓰려면 위 설정과 NAS 푸시 중계 절차를 모두 마친다.
+
+### NAS 앱 빌드
+
+1. NAS를 Tailscale에 연결하고 `tailscale serve status`에 나온 HTTPS 주소를 복사한다. 예: `https://datepdf-nas.example.ts.net`. 주소 끝에 `/datepdf`를 붙이지 않는다.
+2. 주소를 실제 Tailscale HTTPS 주소로 바꾸고 PC PowerShell에서 아래 명령을 실행한다. 사용자 토큰은 NAS `.env`의 `DATEPDF_NAS_TOKEN`과 동일한 값이어야 한다. 입력은 화면에 표시되지 않고 PowerShell 명령 기록에도 토큰 자체가 남지 않는다.
+
+```powershell
+cd D:\my_portfolio\Date-Pdf
+flutter pub get
+$SecureUserToken = Read-Host "NAS 사용자 토큰 입력" -AsSecureString
+$DatePdfUserToken = [System.Net.NetworkCredential]::new("", $SecureUserToken).Password
+flutter build apk --release --dart-define=DATEPDF_BACKEND=nas --dart-define=DATEPDF_NAS_BASE_URL=https://datepdf-nas.example.ts.net --dart-define=DATEPDF_NAS_TOKEN=$DatePdfUserToken
+Remove-Variable DatePdfUserToken, SecureUserToken
+```
+
+3. 빌드 결과를 `datepdf-nas.apk` 등으로 따로 복사한 뒤 휴대폰에 설치하고 Tailscale을 켠다. 관리자 기능이 필요하면 앱 설정의 관리자 모드에서 NAS `.env`에 저장한 `DATEPDF_NAS_ADMIN_TOKEN`을 입력한다. 관리자 토큰은 빌드 명령에 넣지 않는다. APK에는 사용자 토큰이 포함되므로 APK를 신뢰할 수 없는 사람에게 전달하지 말고, 유출 시 새 사용자 토큰으로 NAS 설정과 APK를 함께 교체한다. Firebase 기본 빌드는 코드 `123456`을 사용하므로 Firebase를 계속 운영할 경우 별도 인증 교체가 필요하다. 설치된 앱을 Firebase/NAS 간 전환할 때는 해당 백엔드로 다시 빌드한 APK를 설치한다.
+
+앱에서 날짜 선택/PDF 다운로드/오프라인 캐시, 제목 표시, 조회수, Q&A 질문과 관리자 답변·삭제, 일반 사용자 화면에서 작성자 이름 숨김, PDF 교체, 제목 카탈로그 저장을 확인한다. 서버 `/api/pdf/current/metadata`는 PDF 파일 정보와 페이지 수를 제공한다. 제목 자동 분석은 **Python API가 수행하지 않는다**. 관리자 앱의 `제목 카탈로그` 화면이 PDF를 읽고 OCR/레이아웃 분석 후 결과를 NAS 카탈로그에 저장한다. 실제 PDF로 365개 중 성공·저신뢰·실패 개수를 확인하고 낮은 신뢰도는 사람이 검수한다. PDF를 교체한 뒤에는 새 PDF 기준으로 제목 카탈로그도 다시 분석/검수한다.
+
+### PDF 및 Q&A 알림 동작
+
+알림은 휴대폰의 OS 알림 권한과 앱 설정의 PDF/Q&A 알림 스위치가 모두 켜져 있어야 보인다. 앱은 알림을 높은 중요도의 로컬 알림 채널에 표시한다.
+
+| 백엔드 | PDF 업데이트 | 내 질문에 답변 | 백그라운드/앱 종료 |
+| --- | --- | --- | --- |
+| Firebase | 앱이 열려 있으면 Firestore 변경을 감지한다. 배포된 `functions/index.js`의 `notifyOnPdfUpdate`가 등록된 FCM 기기들에도 푸시를 보낸다. | Firestore 변경 감지와 `notifyOnQnaAnswer` FCM 푸시를 쓴다. 질문 작성 시 저장한 해당 기기의 토큰으로만 보낸다. | Cloud Functions가 배포되어 있고 FCM/OS 알림 권한이 정상이라면 푸시 수신이 가능하다. 앱이 열려 있을 때는 앱이 로컬 알림으로 표시한다. 실제 기기별 수신은 배포/FCM 설정 후 확인해야 한다. |
+| NAS | 기본은 앱 실행 중 30초 간격 확인과 로컬 시스템 알림이다. FCM 중계를 설정하면 NAS가 Cloud Function을 호출해 등록된 NAS 앱 기기에 푸시한다. | 기본은 앱 실행 중 30초 간격 확인이다. FCM 중계를 설정하면 답변된 질문을 쓴 기기에 푸시한다. | FCM 중계와 Functions 배포가 완료되면 Firebase 경로로 휴대폰 푸시를 받을 수 있다. 미설정/실패 시 앱이 열려 있는 동안의 30초 확인이 대체 경로다. |
+
+알림 문구는 PDF의 경우 “PDF가 업데이트되었습니다 / 새로운 말씀 PDF를 확인해 보세요”, 답변의 경우 “Q&A 답변이 등록되었습니다”와 답변 일부(최대 80자)다. NAS에서도 앱을 닫은 뒤 휴대폰 푸시를 받으려면 다음 FCM 중계를 한 번 설정한다.
+
+1. `functions/.env.example`을 `functions/.env`로 복사하고 `NAS_PUSH_SECRET`에 BAT에서 만든 중계 비밀값을 입력한다. 이 파일은 Git에 올리지 않는다.
+2. NAS `/volume1/docker/datepdf/.env`에 같은 값을 `DATEPDF_NAS_PUSH_SECRET`으로 넣는다. `DATEPDF_NAS_PUSH_URL`은 비워두지 말고, Firebase Functions 배포가 출력한 `notifyNasEvent` HTTPS 주소를 넣는다.
+3. 저장소 루트에서 `firebase deploy --only functions`를 실행하고, 출력된 `notifyNasEvent` URL을 NAS `.env`의 `DATEPDF_NAS_PUSH_URL`에 설정한다. 갱신된 `python/nas_api.py`와 `python/nas_requirements.txt`를 NAS `/volume1/docker/datepdf/app/`에 복사하고 프로젝트 경로에서 `sudo docker compose up -d --build`를 실행한다. NAS 앱도 NAS URL/사용자 토큰으로 다시 빌드해 설치한다. NAS APK는 FCM을 위해 기존 Firebase 프로젝트 설정을 사용하지만, Q&A/PDF 데이터는 NAS에 둔다.
+4. Firebase Firestore의 `notification_tokens`에 앱 기기의 FCM 토큰이 등록되는지 확인한다. Firebase 보안 규칙은 앱이 자기 토큰 문서를 등록/갱신하도록 허용해야 한다. 기기 알림 권한을 허용한 후 앱을 한 번 열어 토큰 등록을 마치고, 앱을 닫은 상태에서 PDF 교체와 테스트 답변 푸시를 확인한다. iPhone에서는 Firebase 콘솔에 APNs 인증 키도 등록해야 한다.
+
+Firebase 앱의 백그라운드/종료 푸시도 같은 Cloud Functions에 의존한다. Q&A 새 질문에 대한 관리자 이메일은 `functions/.env`에 SMTP와 수신 주소를 설정한 경우에만 전송된다. 상세 설정은 `functions/README.md`를 따른다. 푸시가 오지 않으면 NAS 로그의 `NAS push relay failed`, Firebase Functions 로그, 알림 권한과 토큰 등록을 확인한다. 중계 미설정 시 NAS 앱이 열려 있을 때의 30초 확인만 동작한다.
+
+## Q&A 작성자 표시와 질문 삭제
+
+질문 작성 시 `닉네임` 또는 `익명`을 고른다. 닉네임을 고르면 현재 앱에 저장된 닉네임을 관리자에게 표시하고, 익명을 고르면 작성자 표시는 `익명`으로 저장한다. 일반 사용자의 Q&A 목록과 상세 화면에는 어느 경우에도 작성자 이름을 표시하지 않는다. NAS 모드의 `GET /api/qna` 응답에서도 `authorName`과 FCM 알림 토큰을 제외한다. 작성자 이름을 포함한 관리 목록은 `GET /api/admin/qna`로 분리되어 관리자 토큰이 필요하다. 알림 대상 기기를 구분하기 위한 불투명한 기기 ID는 NAS의 foreground 알림 확인에 사용한다.
+
+관리자 Q&A 화면에서 질문을 열고 `질문 삭제`를 선택하면 확인창을 거쳐 NAS 데이터베이스에서 삭제한다. 삭제와 답변 수정은 관리자 토큰이 있어야 하며 오프라인에서는 사용할 수 없다. 삭제한 항목 복구는 설정된 Hyper Backup 백업에서 수행한다. NAS가 아닌 기존 Firebase 백엔드를 쓰는 경우 앱 화면에서는 작성자를 감추지만, Firestore 문서 접근 자체의 비공개 여부는 Firebase Security Rules 설정에 달려 있다.
 
 ## 오프라인 모드
 

@@ -103,10 +103,14 @@ class NasApiClient {
         error is http.ClientException;
   }
 
-  Future<http.Response> get(String path, {Map<String, String>? query}) {
+  Future<http.Response> get(
+    String path, {
+    Map<String, String>? query,
+    bool admin = false,
+  }) {
     return _requestWithRetry(
       () => http
-          .get(_uri(path, query), headers: _headers())
+          .get(_uri(path, query), headers: _headers(admin: admin))
           .timeout(_requestTimeout),
     );
   }
@@ -120,8 +124,9 @@ class NasApiClient {
   Future<Map<String, dynamic>> getJson(
     String path, {
     Map<String, String>? query,
+    bool admin = false,
   }) async {
-    final response = await get(path, query: query);
+    final response = await get(path, query: query, admin: admin);
     _check(response);
     final decoded = jsonDecode(response.body);
     if (decoded is! Map) {
@@ -150,6 +155,15 @@ class NasApiClient {
     if (response.body.trim().isEmpty) return <String, dynamic>{};
     final decoded = jsonDecode(response.body);
     return decoded is Map ? Map<String, dynamic>.from(decoded) : {};
+  }
+
+  Future<void> delete(String path, {bool admin = true}) async {
+    final response = await _requestWithRetry(
+      () => http
+          .delete(_uri(path), headers: _headers(admin: admin))
+          .timeout(_requestTimeout),
+    );
+    _check(response);
   }
 
   Future<Map<String, dynamic>> postJson(

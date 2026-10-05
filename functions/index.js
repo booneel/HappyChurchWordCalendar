@@ -1,6 +1,7 @@
 const functions = require('firebase-functions/v1');
 const admin = require('firebase-admin');
 const nodemailer = require('nodemailer');
+const crypto = require('crypto');
 
 admin.initializeApp();
 
@@ -13,6 +14,7 @@ const smtpSecure = (process.env.SMTP_SECURE || 'true').toLowerCase() !== 'false'
 const smtpUser = (process.env.SMTP_USER || '').trim();
 const smtpPassword = process.env.SMTP_PASSWORD || '';
 const smtpFrom = (process.env.SMTP_FROM || smtpUser).trim();
+const nasPushSecret = (process.env.NAS_PUSH_SECRET || '').trim();
 
 function escapeHtml(value) {
   return String(value || '')
@@ -121,11 +123,26 @@ async function sendToTokens({ tokens, title, body, type, questionId }) {
   }
 }
 
-async function getRegisteredTokens() {
+async function getRegisteredTokens({ backend } = {}) {
   const snapshot = await db.collection('notification_tokens').get();
   return snapshot.docs
+    .filter((doc) => {
+      const registeredBackend = doc.data().backend;
+      if (backend === 'nas') return registeredBackend === 'nas';
+      return registeredBackend !== 'nas';
+    })
     .map((doc) => doc.data().token || doc.id)
     .filter((token) => typeof token === 'string' && token.length > 0);
+}
+
+function hasValidNasPushSecret(req) {
+  const authorization = String(req.get('authorization') || '');
+  if (!nasPushSecret || !/^Bearer\s+/i.test(authorization)) return false;
+  const provided = authorization.replace(/^Bearer\s+/i, '');
+  const expectedBuffer = Buffer.from(nasPushSecret);
+  const providedBuffer = Buffer.from(provided);
+  return expectedBuffer.length === providedBuffer.length &&
+    crypto.timingSafeEqual(expectedBuffer, providedBuffer);
 }
 
 exports.notifyAdminOnQnaCreated = functions.firestore
@@ -171,11 +188,49 @@ exports.notifyOnPdfUpdate = functions.firestore
   const afterVersion = `${after.updatedAt || ''}|${after.pdfUrl || ''}|${after.fileSize || ''}`;
   if (beforeVersion === afterVersion) return;
 
-  const tokens = await getRegisteredTokens();
+  const tokens = await getRegisteredTokens({ backend: 'firebase' });
   await sendToTokens({
     tokens,
     title: 'PDF가 업데이트되었습니다',
     body: '새로운 말씀 PDF를 확인해 보세요.',
     type: 'pdf_update',
   });
+});
+
+exports.notifyNasEvent = functions.https.onRequest(async (req, res) => {
+  if (req.method !== 'POST') return res.status(405).send('POST required');
+  if (!hasValidNasPushSecret(req)) return res.status(401).send('Unauthorized');
+
+  const { type, deviceId, answer, questionId } = req.body || {};
+  if (type === 'pdf_update') {
+    const tokens = await getRegisteredTokens({ backend: 'nas' });
+    await sendToTokens({
+      tokens,
+      title: 'PDF가 업데이트되었습니다',
+      body: '새로운 말씀 PDF를 확인해 보세요.',
+      type: 'pdf_update',
+    });
+    return res.status(200).json({ ok: true, recipients: tokens.length });
+  }
+
+  if (type === 'qna_answer' && typeof deviceId === 'string' &&
+      deviceId.length > 0 && typeof questionId === 'string' && questionId.length > 0) {
+    const snapshot = await db.collection('notification_tokens')
+      .where('deviceId', '==', deviceId)
+      .get();
+    const tokens = snapshot.docs
+      .filter((doc) => doc.data().backend === 'nas')
+      .map((doc) => doc.data().token || doc.id)
+      .filter((token) => typeof token === 'string' && token.length > 0);
+    await sendToTokens({
+      tokens,
+      title: 'Q&A 답변이 등록되었습니다',
+      body: shortText(answer || '질문에 대한 답변을 확인해 보세요.'),
+      type: 'qna_answer',
+      questionId,
+    });
+    return res.status(200).json({ ok: true, recipients: tokens.length });
+  }
+
+  return res.status(400).send('Unsupported notification event');
 });

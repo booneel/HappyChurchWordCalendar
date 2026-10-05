@@ -309,7 +309,7 @@ class _AdminPageSettingsPageState extends State<AdminPageSettingsPage> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        '📅 매핑 미리보기 ($_year년)',
+                        '📅 매핑 미리보기',
                         style: const TextStyle(
                           fontWeight: FontWeight.w700,
                           fontSize: 15,

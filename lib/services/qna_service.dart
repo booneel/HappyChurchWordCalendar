@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -197,6 +198,52 @@ class QnaService {
             snapshot.docs.map((doc) => QnaItem.fromFirestore(doc)).toList());
   }
 
+  Future<List<QnaItem>> getAdminQuestions() async {
+    if (BackendConfig.useNas && !_nas.hasAdminToken) return [];
+    try {
+      if (BackendConfig.useNas) {
+        final data = await _nas.getJson('/api/admin/qna', admin: true);
+        final rawItems = data['items'];
+        final items = rawItems is List
+            ? rawItems
+                .whereType<Map>()
+                .map(
+                    (item) => QnaItem.fromJson(Map<String, dynamic>.from(item)))
+                .toList()
+            : <QnaItem>[];
+        await _saveLocalList(items);
+        return items;
+      }
+
+      final snapshot = await _db
+          .collection(_collection)
+          .orderBy('createdAt', descending: true)
+          .limit(50)
+          .get();
+      final items =
+          snapshot.docs.map((doc) => QnaItem.fromFirestore(doc)).toList();
+      if (items.isNotEmpty) await _saveLocalList(items);
+      return items;
+    } catch (error) {
+      if (error is HttpException &&
+          (error.message.contains('401') || error.message.contains('403'))) {
+        return [];
+      }
+      return _loadLocalList();
+    }
+  }
+
+  Stream<List<QnaItem>> streamAdminQuestions() {
+    if (BackendConfig.useNas) return _nasAdminQuestionStream();
+    return _db
+        .collection(_collection)
+        .orderBy('createdAt', descending: true)
+        .limit(50)
+        .snapshots()
+        .map((snapshot) =>
+            snapshot.docs.map((doc) => QnaItem.fromFirestore(doc)).toList());
+  }
+
   /// 관리자: 질문에 답변 등록/수정
   Future<void> answerQuestion({
     required String questionId,
@@ -247,6 +294,19 @@ class QnaService {
     await _saveLocalList(updated);
   }
 
+  Future<void> deleteQuestion(String questionId) async {
+    if (BackendConfig.useNas) {
+      await _nas.delete('/api/qna/$questionId');
+    } else {
+      await _db.collection(_collection).doc(questionId).delete();
+    }
+
+    final remaining = (await _loadLocalList())
+        .where((item) => item.id != questionId)
+        .toList();
+    await _saveLocalList(remaining);
+  }
+
   /// 관리자: 질문 읽음 처리
   Future<void> markAsReadByAdmin(String questionId) async {
     if (BackendConfig.useNas && !_nas.isServerReachable) return;
@@ -266,7 +326,7 @@ class QnaService {
   Future<int> getUnreadQuestionCount() async {
     try {
       if (BackendConfig.useNas) {
-        final items = await getQuestions();
+        final items = await getAdminQuestions();
         return items.where((item) => !item.isReadByAdmin).length;
       }
       final snapshot = await _db
@@ -282,7 +342,7 @@ class QnaService {
   /// 관리자용 읽지 않은 질문 수 Stream
   Stream<int> streamUnreadCount() {
     if (BackendConfig.useNas) {
-      return _nasQuestionStream().map(
+      return _nasAdminQuestionStream().map(
         (items) => items.where((item) => !item.isReadByAdmin).length,
       );
     }
@@ -297,6 +357,14 @@ class QnaService {
     yield await _loadLocalList();
     while (true) {
       yield await getQuestions();
+      await Future<void>.delayed(const Duration(seconds: 30));
+    }
+  }
+
+  Stream<List<QnaItem>> _nasAdminQuestionStream() async* {
+    yield _nas.hasAdminToken ? await _loadLocalList() : <QnaItem>[];
+    while (true) {
+      yield await getAdminQuestions();
       await Future<void>.delayed(const Duration(seconds: 30));
     }
   }

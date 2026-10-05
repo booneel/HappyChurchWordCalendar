@@ -19,10 +19,11 @@ class _AdminQnaPageState extends State<AdminQnaPage> {
   void _openAnswerDialog(QnaItem item) {
     final answerController = TextEditingController(text: item.answer ?? '');
     final dateFormat = DateFormat('yyyy년 M월 d일 HH:mm', 'ko_KR');
-    final readOnlyOffline =
-        BackendConfig.useNas && !NasApiClient.instance.isServerReachable;
+    final readOnly = BackendConfig.useNas &&
+        (!NasApiClient.instance.hasAdminToken ||
+            !NasApiClient.instance.isServerReachable);
 
-    if (!readOnlyOffline) _qnaService.markAsReadByAdmin(item.id);
+    if (!readOnly) _qnaService.markAsReadByAdmin(item.id);
 
     showDialog<void>(
       context: context,
@@ -86,7 +87,7 @@ class _AdminQnaPageState extends State<AdminQnaPage> {
                   ),
                 ),
                 const SizedBox(height: 6),
-                if (readOnlyOffline)
+                if (readOnly)
                   const Padding(
                     padding: EdgeInsets.only(bottom: 12),
                     child: Text(
@@ -94,7 +95,7 @@ class _AdminQnaPageState extends State<AdminQnaPage> {
                   ),
                 TextField(
                   controller: answerController,
-                  readOnly: readOnlyOffline,
+                  readOnly: readOnly,
                   minLines: 4,
                   maxLines: 8,
                   maxLength: 500,
@@ -111,11 +112,18 @@ class _AdminQnaPageState extends State<AdminQnaPage> {
           ),
         ),
         actions: [
+          if (!readOnly)
+            TextButton.icon(
+              onPressed: () => _confirmAndDeleteQuestion(item, dialogContext),
+              icon: const Icon(Icons.delete_outline),
+              label: const Text('질문 삭제'),
+              style: TextButton.styleFrom(foregroundColor: Colors.red),
+            ),
           TextButton(
             onPressed: () => Navigator.pop(dialogContext),
             child: const Text('취소'),
           ),
-          if (!readOnlyOffline)
+          if (!readOnly)
             FilledButton(
               onPressed: () async {
                 final text = answerController.text.trim();
@@ -154,6 +162,47 @@ class _AdminQnaPageState extends State<AdminQnaPage> {
     ).whenComplete(answerController.dispose);
   }
 
+  Future<void> _confirmAndDeleteQuestion(
+    QnaItem item,
+    BuildContext dialogContext,
+  ) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (confirmContext) => AlertDialog(
+        title: const Text('질문 삭제'),
+        content: Text('「${item.title}」 질문을 삭제할까요? 삭제하면 복구할 수 없습니다.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(confirmContext, false),
+            child: const Text('취소'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(confirmContext, true),
+            child: const Text('삭제'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    try {
+      await _qnaService.deleteQuestion(item.id);
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('질문을 삭제하지 못했습니다. 연결과 관리자 권한을 확인해 주세요.')),
+      );
+      return;
+    }
+
+    if (!mounted || !dialogContext.mounted) return;
+    Navigator.pop(dialogContext);
+    setState(() {});
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('질문을 삭제했습니다.')),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final dateFormat = DateFormat('yyyy.MM.dd HH:mm', 'ko_KR');
@@ -161,7 +210,7 @@ class _AdminQnaPageState extends State<AdminQnaPage> {
     return Scaffold(
       appBar: AppBar(title: const Text('QnA 질문 및 답변 관리')),
       body: StreamBuilder<List<QnaItem>>(
-        stream: _qnaService.streamQuestions(),
+        stream: _qnaService.streamAdminQuestions(),
         builder: (context, snapshot) {
           final items = snapshot.data ?? [];
 

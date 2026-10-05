@@ -16,6 +16,7 @@ import sqlite3
 import tempfile
 import threading
 import hashlib
+import httpx
 from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -36,6 +37,8 @@ DATA = ROOT / "data"
 BACKUPS = ROOT / "backups"
 TOKEN = os.getenv("DATEPDF_NAS_TOKEN", "").strip()
 ADMIN_TOKEN = os.getenv("DATEPDF_NAS_ADMIN_TOKEN", "").strip()
+PUSH_RELAY_URL = os.getenv("DATEPDF_NAS_PUSH_URL", "").strip()
+PUSH_RELAY_SECRET = os.getenv("DATEPDF_NAS_PUSH_SECRET", "").strip()
 PDF = DATA / "current.pdf"
 CATALOG = DATA / "catalog.json"
 SETTINGS = DATA / "settings.json"
@@ -44,6 +47,23 @@ STATS = DATA / "stats.json"
 DATABASE = DATA / "datepdf.sqlite3"
 PDF_META = DATA / "pdf_metadata.json"
 WRITE_LOCK = threading.RLock()
+
+
+async def notify_nas_push(event: dict[str, Any]) -> None:
+    """Relay NAS changes through the Firebase project to FCM devices, if set up."""
+    if not PUSH_RELAY_URL or not PUSH_RELAY_SECRET:
+        return
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.post(
+                PUSH_RELAY_URL,
+                headers={"Authorization": f"Bearer {PUSH_RELAY_SECRET}"},
+                json=event,
+            )
+            response.raise_for_status()
+    except Exception as error:
+        # A push relay outage must not roll back a successful NAS write.
+        print(f"NAS push relay failed: {type(error).__name__}", flush=True)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -311,6 +331,7 @@ async def upload_pdf(file: UploadFile = File(...)) -> dict[str, Any]:
                     "sha256": hashlib.sha256(PDF.read_bytes()).hexdigest(),
                 },
             )
+        await notify_nas_push({"type": "pdf_update"})
         return pdf_metadata()
     finally:
         temporary.unlink(missing_ok=True)
@@ -393,6 +414,15 @@ def put_settings(payload: SettingsPayload) -> dict[str, Any]:
 
 @app.get("/api/qna", dependencies=[Depends(require_auth)])
 def get_qna() -> dict[str, Any]:
+    return _read_qna_items(include_author=False)
+
+
+@app.get("/api/admin/qna", dependencies=[Depends(require_admin)])
+def get_admin_qna() -> dict[str, Any]:
+    return _read_qna_items(include_author=True)
+
+
+def _read_qna_items(*, include_author: bool) -> dict[str, Any]:
     with database() as connection:
         rows = connection.execute(
             "SELECT payload FROM qna ORDER BY created_at DESC LIMIT 50"
@@ -404,8 +434,11 @@ def get_qna() -> dict[str, Any]:
         except json.JSONDecodeError:
             continue
         if isinstance(item, dict):
-            # NAS polling uses authorDeviceId; never return FCM credentials to clients.
             item.pop("notificationToken", None)
+            if not include_author:
+                item.pop("authorName", None)
+                # Keep the opaque device ID for answer-notification targeting.
+                item.pop("isReadByAdmin", None)
             items.append(item)
     return {"items": items}
 
@@ -438,12 +471,14 @@ def create_qna(payload: QuestionPayload) -> dict[str, Any]:
 
 
 @app.put("/api/qna/{question_id}", dependencies=[Depends(require_admin)])
-def update_qna(question_id: str, updates: dict[str, Any]) -> dict[str, Any]:
+async def update_qna(question_id: str, updates: dict[str, Any]) -> dict[str, Any]:
     allowed = {"answer", "answeredAt", "isAnswered", "isReadByAdmin"}
     if not updates or set(updates) - allowed:
         raise HTTPException(status_code=400, detail="Unsupported QnA update")
     if "answer" in updates and (not isinstance(updates["answer"], str) or len(updates["answer"]) > 5000):
         raise HTTPException(status_code=400, detail="Invalid answer")
+    updated_item = None
+    was_answered = False
     with database() as connection:
         with connection:
             row = connection.execute(
@@ -452,6 +487,7 @@ def update_qna(question_id: str, updates: dict[str, Any]) -> dict[str, Any]:
             ).fetchone()
             if row is not None:
                 item = json.loads(row["payload"])
+                was_answered = item.get("isAnswered") is True
                 item.update(updates)
                 connection.execute(
                     """
@@ -465,8 +501,30 @@ def update_qna(question_id: str, updates: dict[str, Any]) -> dict[str, Any]:
                         question_id,
                     ),
                 )
-                return item
-    raise HTTPException(status_code=404, detail="question not found")
+                updated_item = item
+    if updated_item is None:
+        raise HTTPException(status_code=404, detail="question not found")
+    if not was_answered and updated_item.get("isAnswered") is True:
+        await notify_nas_push({
+            "type": "qna_answer",
+            "deviceId": updated_item.get("authorDeviceId"),
+            "questionId": question_id,
+            "answer": updated_item.get("answer") or "",
+        })
+    return updated_item
+
+
+@app.delete("/api/qna/{question_id}", dependencies=[Depends(require_admin)])
+def delete_qna(question_id: str) -> dict[str, bool]:
+    with database() as connection:
+        with connection:
+            result = connection.execute(
+                "DELETE FROM qna WHERE id = ?",
+                (question_id,),
+            )
+    if result.rowcount == 0:
+        raise HTTPException(status_code=404, detail="question not found")
+    return {"ok": True}
 
 
 if __name__ == "__main__":
