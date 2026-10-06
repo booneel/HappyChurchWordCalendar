@@ -6,8 +6,9 @@ import 'package:intl/intl.dart';
 import 'package:pdfrx/pdfrx.dart' as pdfrx;
 
 import 'app_shell.dart';
+import 'bookmark_list_page.dart';
 import 'pdf_page.dart';
-import 'recent_history_page.dart';
+import '../services/bookmark_service.dart';
 import '../services/date_page_mapper.dart';
 import '../services/pdf_cache_service.dart';
 import '../services/pdf_catalog_service.dart';
@@ -15,9 +16,9 @@ import '../services/view_history_service.dart';
 
 class _HomeData {
   final List<PageViewStat> topPages;
-  final List<RecentDirectOpen> recent;
+  final List<BookmarkItem> bookmarks;
 
-  const _HomeData({required this.topPages, required this.recent});
+  const _HomeData({required this.topPages, required this.bookmarks});
 }
 
 class HomePage extends StatefulWidget {
@@ -38,10 +39,10 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   final ViewHistoryService history = ViewHistoryService.instance;
+  final BookmarkService bookmarkService = BookmarkService.instance;
   final PdfCatalogService catalogService = PdfCatalogService.instance;
 
   late Future<_HomeData> dataFuture;
-  StreamSubscription<List<PageViewStat>>? _topPagesSubscription;
   bool _titlesLoaded = false;
   late Future<File> _pdfFuture;
 
@@ -51,13 +52,7 @@ class _HomePageState extends State<HomePage> {
     dataFuture = _loadData();
     _pdfFuture = PdfCacheService().getCachedPdf();
 
-    // PDF는 홈을 보는 동안 백그라운드에서 미리 준비합니다.
     unawaited(_preloadAssets());
-    _topPagesSubscription = history.streamTopPages(limit: 3).listen((_) {
-      if (mounted) {
-        _refresh();
-      }
-    });
   }
 
   Future<void> _preloadAssets() async {
@@ -77,21 +72,15 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  @override
-  void dispose() {
-    _topPagesSubscription?.cancel();
-    super.dispose();
-  }
-
   Future<_HomeData> _loadData() async {
     final results = await Future.wait([
-      history.getTopPages(limit: 3),
-      history.getRecent(limit: 3),
+      bookmarkService.getTopBookmarkedPages(limit: 3),
+      bookmarkService.getBookmarks(),
     ]);
 
     return _HomeData(
       topPages: results[0] as List<PageViewStat>,
-      recent: results[1] as List<RecentDirectOpen>,
+      bookmarks: (results[1] as List<BookmarkItem>).take(3).toList(),
     );
   }
 
@@ -164,11 +153,7 @@ class _HomePageState extends State<HomePage> {
                 : data.topPages
                     .where((item) => dateForPage(item.page) != null)
                     .toList();
-            final recentItems = data == null
-                ? <RecentDirectOpen>[]
-                : data.recent
-                    .where((item) => dateForPage(item.page) != null)
-                    .toList();
+            final bookmarkItems = data == null ? <BookmarkItem>[] : data.bookmarks;
 
             return ListView(
               padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
@@ -188,11 +173,11 @@ class _HomePageState extends State<HomePage> {
                       color: Colors.amber.shade50,
                       borderRadius: BorderRadius.circular(14),
                     ),
-                    child: Row(
+                    child: const Row(
                       children: [
                         Icon(Icons.admin_panel_settings_outlined, size: 20),
                         SizedBox(width: 8),
-                        const Expanded(
+                        Expanded(
                           child: Text('관리자 모드가 활성화되어 있습니다.', softWrap: true),
                         ),
                       ],
@@ -277,7 +262,7 @@ class _HomePageState extends State<HomePage> {
                 ),
                 const SizedBox(height: 24),
                 Text(
-                  '🔥 많이 본 말씀 Top 3',
+                  '🔥 많이 본 말씀 Top 3 (즐겨찾기순)',
                   style: Theme.of(context)
                       .textTheme
                       .titleLarge
@@ -296,7 +281,7 @@ class _HomePageState extends State<HomePage> {
                   const Card(
                     child: Padding(
                       padding: EdgeInsets.all(18),
-                      child: Text('아직 직접 열어본 말씀 조회 기록이 없습니다.'),
+                      child: Text('아직 즐겨찾기 등록된 말씀이 없습니다.'),
                     ),
                   )
                 else
@@ -325,7 +310,7 @@ class _HomePageState extends State<HomePage> {
                   children: [
                     Expanded(
                       child: Text(
-                        '🕘 최근 본 말씀',
+                        '⭐ 즐겨찾기 한 말씀',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: Theme.of(context)
@@ -339,7 +324,7 @@ class _HomePageState extends State<HomePage> {
                         await Navigator.push(
                           context,
                           MaterialPageRoute(
-                            builder: (_) => const RecentHistoryPage(),
+                            builder: (_) => const BookmarkListPage(),
                           ),
                         );
                         _refresh();
@@ -349,20 +334,20 @@ class _HomePageState extends State<HomePage> {
                   ],
                 ),
                 const SizedBox(height: 8),
-                if (recentItems.isEmpty)
+                if (bookmarkItems.isEmpty)
                   const Card(
                     child: Padding(
                       padding: EdgeInsets.all(18),
-                      child: Text('아직 직접 열어본 말씀이 없습니다.'),
+                      child: Text('아직 즐겨찾기 한 말씀이 없습니다. PDF에서 ⭐ 버튼을 눌러보세요!'),
                     ),
                   )
                 else
                   Card(
                     child: Column(
                       children: [
-                        for (final item in recentItems)
-                          _RecentWordRow(
-                            date: item.date,
+                        for (final item in bookmarkItems)
+                          _BookmarkWordRow(
+                            item: item,
                             onTap: () =>
                                 _openPdf(page: item.page, date: item.date),
                           ),
@@ -486,13 +471,13 @@ class _TopWordCard extends StatelessWidget {
               ),
               const SizedBox(height: 6),
               Text(
-                '$views회 열람',
+                '⭐ $views회 즐겨찾기',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   fontSize: 11,
-                  color: Colors.grey.shade600,
-                  fontWeight: FontWeight.w600,
+                  color: Colors.amber.shade900,
+                  fontWeight: FontWeight.w700,
                 ),
               ),
             ],
@@ -503,19 +488,19 @@ class _TopWordCard extends StatelessWidget {
   }
 }
 
-class _RecentWordRow extends StatelessWidget {
-  final DateTime date;
+class _BookmarkWordRow extends StatelessWidget {
+  final BookmarkItem item;
   final VoidCallback onTap;
 
-  const _RecentWordRow({required this.date, required this.onTap});
+  const _BookmarkWordRow({required this.item, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    final title = PdfCatalogService.instance.formatTitleForDate(date);
-    final dateText = DateFormat('yyyy년 M월 d일 (E)', 'ko_KR').format(date);
+    final title = PdfCatalogService.instance.formatTitleForDate(item.date);
+    final dateText = DateFormat('yyyy년 M월 d일 (E)', 'ko_KR').format(item.date);
 
     return ListTile(
-      leading: const Icon(Icons.menu_book_outlined),
+      leading: const Icon(Icons.star, color: Colors.amber),
       title: Text(
         title,
         style: const TextStyle(fontWeight: FontWeight.w700),

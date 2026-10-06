@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../services/bookmark_service.dart';
 import '../services/date_page_mapper.dart';
 import '../services/pdf_catalog_service.dart';
 import '../services/qna_service.dart';
@@ -16,29 +17,44 @@ class AdminStatsPage extends StatefulWidget {
 
 class _AdminStatsPageState extends State<AdminStatsPage> {
   final ViewHistoryService _historyService = ViewHistoryService.instance;
+  final BookmarkService _bookmarkService = BookmarkService.instance;
   final QnaService _qnaService = QnaService.instance;
   final PdfCatalogService _catalogService = PdfCatalogService.instance;
 
   bool _loading = true;
-  List<PageViewStat> _topPages = [];
+  String _statMode = 'bookmarks'; // 'bookmarks' or 'views'
+
+  List<PageViewStat> _topBookmarks = [];
+  List<PageViewStat> _topViews = [];
+
   int _totalQnaCount = 0;
   int _answeredQnaCount = 0;
-  StreamSubscription<List<PageViewStat>>? _topPagesSubscription;
+
+  StreamSubscription<List<PageViewStat>>? _viewsSubscription;
+  StreamSubscription<List<PageViewStat>>? _bookmarksSubscription;
 
   @override
   void initState() {
     super.initState();
     _loadStats();
-    _topPagesSubscription =
+
+    _viewsSubscription =
         _historyService.streamTopPages(limit: 10).listen((top) {
       if (!mounted) return;
-      setState(() => _topPages = top);
+      setState(() => _topViews = top);
+    });
+
+    _bookmarksSubscription =
+        _bookmarkService.streamTopBookmarkedPages(limit: 10).listen((top) {
+      if (!mounted) return;
+      setState(() => _topBookmarks = top);
     });
   }
 
   @override
   void dispose() {
-    _topPagesSubscription?.cancel();
+    _viewsSubscription?.cancel();
+    _bookmarksSubscription?.cancel();
     super.dispose();
   }
 
@@ -46,7 +62,8 @@ class _AdminStatsPageState extends State<AdminStatsPage> {
     setState(() => _loading = true);
 
     try {
-      final top = await _historyService.getTopPages(limit: 10);
+      final views = await _historyService.getTopPages(limit: 10);
+      final bookmarks = await _bookmarkService.getTopBookmarkedPages(limit: 10);
       final qnaList = await _qnaService.getQuestions();
 
       final answered = qnaList.where((q) => q.isAnswered).length;
@@ -54,7 +71,8 @@ class _AdminStatsPageState extends State<AdminStatsPage> {
       if (!mounted) return;
 
       setState(() {
-        _topPages = top;
+        _topViews = views;
+        _topBookmarks = bookmarks;
         _totalQnaCount = qnaList.length;
         _answeredQnaCount = answered;
         _loading = false;
@@ -69,6 +87,7 @@ class _AdminStatsPageState extends State<AdminStatsPage> {
   @override
   Widget build(BuildContext context) {
     final today = DateTime.now();
+    final activeList = _statMode == 'bookmarks' ? _topBookmarks : _topViews;
 
     return Scaffold(
       appBar: AppBar(
@@ -95,8 +114,11 @@ class _AdminStatsPageState extends State<AdminStatsPage> {
                       padding: const EdgeInsets.all(16),
                       child: Row(
                         children: [
-                          const Icon(Icons.question_answer,
-                              color: Color(0xFF4F7CAC), size: 28),
+                          const Icon(
+                            Icons.question_answer,
+                            color: Color(0xFF4F7CAC),
+                            size: 28,
+                          ),
                           const SizedBox(width: 12),
                           Expanded(
                             child: Column(
@@ -128,21 +150,46 @@ class _AdminStatsPageState extends State<AdminStatsPage> {
                   ),
                   const SizedBox(height: 24),
 
-                  // 2. 가장 많이 본 말씀 Top 10
+                  // 2. 통계 선택 모드 (즐겨찾기순 vs 직접 조회수순)
+                  Row(
+                    children: [
+                      ChoiceChip(
+                        avatar: const Icon(Icons.star, size: 16, color: Colors.amber),
+                        label: const Text('즐겨찾기순 Top 10'),
+                        selected: _statMode == 'bookmarks',
+                        onSelected: (_) => setState(() => _statMode = 'bookmarks'),
+                      ),
+                      const SizedBox(width: 8),
+                      ChoiceChip(
+                        avatar: const Icon(Icons.touch_app, size: 16),
+                        label: const Text('직접 조회수순 Top 10'),
+                        selected: _statMode == 'views',
+                        onSelected: (_) => setState(() => _statMode = 'views'),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+
                   Text(
-                    '🔥 가장 많이 본 말씀 Top 10',
+                    _statMode == 'bookmarks'
+                        ? '⭐ 말씀 즐겨찾기 수 Top 10'
+                        : '👁️ 말씀 직접 조회수 Top 10',
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
                           fontWeight: FontWeight.w800,
                         ),
                   ),
                   const SizedBox(height: 10),
 
-                  if (_topPages.isEmpty)
-                    const Card(
+                  if (activeList.isEmpty)
+                    Card(
                       child: Padding(
-                        padding: EdgeInsets.all(20),
+                        padding: const EdgeInsets.all(20),
                         child: Center(
-                          child: Text('아직 집계된 말씀 조회 기록이 없습니다.'),
+                          child: Text(
+                            _statMode == 'bookmarks'
+                                ? '아직 집계된 말씀 즐겨찾기 기록이 없습니다.'
+                                : '아직 집계된 말씀 직접 조회 기록이 없습니다.',
+                          ),
                         ),
                       ),
                     )
@@ -152,9 +199,9 @@ class _AdminStatsPageState extends State<AdminStatsPage> {
                         padding: const EdgeInsets.symmetric(vertical: 8),
                         child: Column(
                           children: [
-                            for (int i = 0; i < _topPages.length; i++) ...[
+                            for (int i = 0; i < activeList.length; i++) ...[
                               Builder(builder: (context) {
-                                final stat = _topPages[i];
+                                final stat = activeList[i];
                                 DateTime date;
                                 try {
                                   date = DatePageMapper.dateForPdfPage(
@@ -171,11 +218,11 @@ class _AdminStatsPageState extends State<AdminStatsPage> {
                                 final title =
                                     _catalogService.formatTitleForDate(date);
 
-                                final maxViews = _topPages.first.views > 0
-                                    ? _topPages.first.views
+                                final maxCount = activeList.first.views > 0
+                                    ? activeList.first.views
                                     : 1;
                                 final ratio =
-                                    (stat.views / maxViews).clamp(0.05, 1.0);
+                                    (stat.views / maxCount).clamp(0.05, 1.0);
 
                                 return ListTile(
                                   leading: SizedBox(
@@ -201,26 +248,33 @@ class _AdminStatsPageState extends State<AdminStatsPage> {
                                     padding: const EdgeInsets.only(top: 6),
                                     child: LinearProgressIndicator(
                                       value: ratio,
-                                      color: const Color(0xFF4F7CAC),
+                                      color: _statMode == 'bookmarks'
+                                          ? Colors.amber.shade700
+                                          : const Color(0xFF4F7CAC),
                                       backgroundColor: Colors.grey.shade200,
                                     ),
                                   ),
                                   trailing: SizedBox(
-                                    width: 58,
+                                    width: 68,
                                     child: Text(
-                                      '${stat.views}회',
+                                      _statMode == 'bookmarks'
+                                          ? '${stat.views}회 ⭐'
+                                          : '${stat.views}회 👁️',
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
                                       textAlign: TextAlign.end,
-                                      style: const TextStyle(
+                                      style: TextStyle(
                                         fontWeight: FontWeight.w800,
-                                        fontSize: 14,
+                                        fontSize: 13,
+                                        color: _statMode == 'bookmarks'
+                                            ? Colors.amber.shade900
+                                            : null,
                                       ),
                                     ),
                                   ),
                                 );
                               }),
-                              if (i < _topPages.length - 1)
+                              if (i < activeList.length - 1)
                                 const Divider(height: 1),
                             ],
                           ],

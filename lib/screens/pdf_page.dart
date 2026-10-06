@@ -5,6 +5,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:pdfrx/pdfrx.dart' as pdfrx;
 
+import '../services/bookmark_service.dart';
 import '../services/date_page_mapper.dart';
 import '../services/pdf_cache_service.dart';
 import '../services/pdf_catalog_service.dart';
@@ -26,18 +27,16 @@ class PdfPage extends StatefulWidget {
 }
 
 class _PdfPageState extends State<PdfPage> {
-  // The actual PDF length is applied after the document opens. Keep this
-  // fallback above any supported date mapping so a longer replacement PDF is
-  // not clamped before it can be opened.
   static const int fallbackTotalPages = 10000;
 
   final PdfCacheService cache = PdfCacheService();
+  final BookmarkService bookmarkService = BookmarkService.instance;
+  final PdfCatalogService catalog = PdfCatalogService.instance;
+
   late int page;
   late Future<File> pdfFuture;
   late String title;
   Axis _scrollDirection = Axis.horizontal;
-
-  final PdfCatalogService catalog = PdfCatalogService.instance;
 
   @override
   void initState() {
@@ -74,9 +73,47 @@ class _PdfPageState extends State<PdfPage> {
       if (mounted && page == pdfPage && loadedTitle != null) {
         setState(() => title = loadedTitle);
       }
-    } catch (_) {
-      // The initial title remains visible when the catalog is unavailable.
-    }
+    } catch (_) {}
+  }
+
+  Widget _buildBookmarkButton() {
+    final isBookmarked = bookmarkService.isBookmarkedSync(page);
+
+    return IconButton(
+      tooltip: isBookmarked ? '즐겨찾기 해제' : '즐겨찾기 추가',
+      onPressed: () async {
+        DateTime pageDate;
+        try {
+          pageDate = DatePageMapper.dateForPdfPage(
+            page,
+            year: widget.year ?? DateTime.now().year,
+          );
+        } catch (_) {
+          pageDate = DateTime.now();
+        }
+
+        final isAdded = await bookmarkService.toggleBookmark(
+          page: page,
+          date: pageDate,
+        );
+
+        if (!mounted) return;
+        setState(() {});
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              isAdded ? '⭐ 즐겨찾기에 추가되었습니다.' : '즐겨찾기에서 해제되었습니다.',
+            ),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      },
+      icon: Icon(
+        isBookmarked ? Icons.star : Icons.star_border,
+        color: isBookmarked ? Colors.amber : null,
+      ),
+    );
   }
 
   @override
@@ -92,20 +129,33 @@ class _PdfPageState extends State<PdfPage> {
           style: const TextStyle(fontSize: 16),
         ),
         actions: [
+          _buildBookmarkButton(),
           IconButton(
-            tooltip:
-                _scrollDirection == Axis.horizontal ? '위아래로 넘기기' : '좌우로 넘기기',
+            tooltip: _scrollDirection == Axis.horizontal
+                ? '현재 방향: 좌우 스크롤 (누르면 위아래로 변경)'
+                : '현재 방향: 위아래 스크롤 (누르면 좌우로 변경)',
             onPressed: () {
+              final newDirection = _scrollDirection == Axis.horizontal
+                  ? Axis.vertical
+                  : Axis.horizontal;
               setState(() {
-                _scrollDirection = _scrollDirection == Axis.horizontal
-                    ? Axis.vertical
-                    : Axis.horizontal;
+                _scrollDirection = newDirection;
               });
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(
+                    newDirection == Axis.horizontal
+                        ? '↔ 좌우 스크롤 모드로 변경되었습니다.'
+                        : '↕ 위아래 스크롤 모드로 변경되었습니다.',
+                  ),
+                  duration: const Duration(seconds: 1),
+                ),
+              );
             },
             icon: Icon(
               _scrollDirection == Axis.horizontal
-                  ? Icons.swap_vert
-                  : Icons.swap_horiz,
+                  ? Icons.swap_horiz
+                  : Icons.swap_vert,
             ),
           ),
           Padding(
@@ -194,9 +244,7 @@ class _SinglePagePdfViewerState extends State<_SinglePagePdfViewer> {
     try {
       final document = await _documentFuture;
       await document.dispose();
-    } catch (_) {
-      // The FutureBuilder already reports a document open error.
-    }
+    } catch (_) {}
   }
 
   @override
@@ -231,6 +279,7 @@ class _SinglePagePdfViewerState extends State<_SinglePagePdfViewer> {
           color: const Color(0xff202124),
           child: PageView.builder(
             controller: _pageController,
+            physics: const BouncingScrollPhysics(), // 다음/이전 말씀 페이지 스와이프 이동 허용
             scrollDirection: widget.scrollDirection,
             itemCount: document.pages.length,
             onPageChanged: (index) => widget.onPageChanged(index + 1),
@@ -315,8 +364,8 @@ class _SinglePdfPageImageState extends State<_SinglePdfPageImage> {
         return InteractiveViewer(
           minScale: 1,
           maxScale: 4,
-          boundaryMargin: const EdgeInsets.all(48),
-          clipBehavior: Clip.none,
+          boundaryMargin: EdgeInsets.zero, // 위치 치우침 방지 (중앙 정렬 고정)
+          clipBehavior: Clip.hardEdge,
           child: Center(
             child: RawImage(
               image: snapshot.data,

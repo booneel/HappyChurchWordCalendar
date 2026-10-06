@@ -4,6 +4,7 @@ import '../services/admin_service.dart';
 import '../services/local_profile_service.dart';
 import 'admin_code_page.dart';
 import 'admin_page.dart';
+import 'recent_history_page.dart';
 
 class SettingsPage extends StatefulWidget {
   final String displayName;
@@ -29,6 +30,9 @@ class _SettingsPageState extends State<SettingsPage> {
   bool pdfNotificationsEnabled = true;
   bool qnaNotificationsEnabled = true;
 
+  bool dailyAlarmEnabled = false;
+  TimeOfDay dailyAlarmTime = const TimeOfDay(hour: 8, minute: 0);
+
   @override
   void initState() {
     super.initState();
@@ -49,10 +53,16 @@ class _SettingsPageState extends State<SettingsPage> {
   Future<void> _loadNotificationPreferences() async {
     final pdfEnabled = await profile.isPdfNotificationsEnabled();
     final qnaEnabled = await profile.isQnaNotificationsEnabled();
+    final alarmEnabled = await profile.isDailyAlarmEnabled();
+    final hour = await profile.getDailyAlarmHour();
+    final minute = await profile.getDailyAlarmMinute();
+
     if (!mounted) return;
     setState(() {
       pdfNotificationsEnabled = pdfEnabled;
       qnaNotificationsEnabled = qnaEnabled;
+      dailyAlarmEnabled = alarmEnabled;
+      dailyAlarmTime = TimeOfDay(hour: hour, minute: minute);
     });
   }
 
@@ -106,6 +116,36 @@ class _SettingsPageState extends State<SettingsPage> {
   Future<void> _setQnaNotifications(bool value) async {
     setState(() => qnaNotificationsEnabled = value);
     await profile.setQnaNotificationsEnabled(value);
+  }
+
+  Future<void> _setDailyAlarmEnabled(bool value) async {
+    setState(() => dailyAlarmEnabled = value);
+    await profile.setDailyAlarmEnabled(value);
+  }
+
+  Future<void> _pickDailyAlarmTime() async {
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: dailyAlarmTime,
+    );
+
+    if (picked != null) {
+      setState(() {
+        dailyAlarmTime = picked;
+        dailyAlarmEnabled = true;
+      });
+      await profile.setDailyAlarmEnabled(true);
+      await profile.setDailyAlarmTime(picked.hour, picked.minute);
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '⏰ 매일 ${picked.format(context)}에 말씀 알림이 설정되었습니다.',
+          ),
+        ),
+      );
+    }
   }
 
   Future<void> _adminEntry() async {
@@ -177,10 +217,54 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
           ),
           const SizedBox(height: 20),
-          const SectionTitle('🔔 알림'),
+
+          const SectionTitle('📖 나의 이용 기록'),
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.history, color: Color(0xFF4F7CAC)),
+              title: const Text('최근 본 말씀 기록'),
+              subtitle: const Text('내가 직접 열어본 말씀 이력 확인'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const RecentHistoryPage(),
+                  ),
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: 20),
+
+          const SectionTitle('🔔 알림 설정'),
           Card(
             child: Column(
               children: [
+                SwitchListTile(
+                  title: const Text('매일 말씀 지정 시간 알림'),
+                  subtitle: Text(
+                    dailyAlarmEnabled
+                        ? '설정 시간: ${dailyAlarmTime.format(context)}'
+                        : '설정한 시간에 매일 말씀을 알려드립니다.',
+                  ),
+                  value: dailyAlarmEnabled,
+                  onChanged: _setDailyAlarmEnabled,
+                ),
+                if (dailyAlarmEnabled)
+                  ListTile(
+                    leading: const Icon(Icons.access_time),
+                    title: const Text('알림 시간 변경'),
+                    trailing: Text(
+                      dailyAlarmTime.format(context),
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF4F7CAC),
+                      ),
+                    ),
+                    onTap: _pickDailyAlarmTime,
+                  ),
+                const Divider(height: 1),
                 SwitchListTile(
                   title: const Text('PDF 업데이트 알림'),
                   value: pdfNotificationsEnabled,
@@ -195,6 +279,7 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
           ),
           const SizedBox(height: 20),
+
           const SectionTitle('🔐 관리자'),
           Card(
             child: ListTile(
@@ -223,10 +308,11 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
           ],
           const SizedBox(height: 20),
+
           const SectionTitle('ℹ️ 앱 정보'),
           Card(
             child: Column(
-              children: [
+              children: const [
                 ListTile(title: Text('앱 버전'), trailing: Text('1.0.0')),
               ],
             ),

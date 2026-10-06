@@ -158,6 +158,20 @@ class PdfCacheService {
   Future<void> refresh() async {
     _loading = null;
     _memoryFile = null;
+
+    try {
+      final dir = await getApplicationSupportDirectory();
+      final cacheDir = Directory('${dir.path}/pdf_cache');
+      final file = File('${cacheDir.path}/$_cacheFileName');
+      if (await file.exists()) {
+        await file.delete();
+      }
+    } catch (_) {}
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_lastCheckKey);
+    await prefs.remove(_generationKey);
+
     await getCachedPdf(forceRefresh: true);
   }
 

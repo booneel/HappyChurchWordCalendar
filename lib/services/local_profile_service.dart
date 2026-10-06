@@ -6,6 +6,10 @@ class LocalProfileService {
   static const _pdfNotificationsKey = 'pdf_notifications_enabled';
   static const _qnaNotificationsKey = 'qna_notifications_enabled';
 
+  static const _dailyAlarmEnabledKey = 'daily_alarm_enabled';
+  static const _dailyAlarmHourKey = 'daily_alarm_hour';
+  static const _dailyAlarmMinuteKey = 'daily_alarm_minute';
+
   Future<String?> getName() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getString(_nameKey);
@@ -44,5 +48,31 @@ class LocalProfileService {
   Future<void> setQnaNotificationsEnabled(bool value) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_qnaNotificationsKey, value);
+  }
+
+  Future<bool> isDailyAlarmEnabled() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_dailyAlarmEnabledKey) ?? false;
+  }
+
+  Future<void> setDailyAlarmEnabled(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_dailyAlarmEnabledKey, value);
+  }
+
+  Future<int> getDailyAlarmHour() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt(_dailyAlarmHourKey) ?? 8;
+  }
+
+  Future<int> getDailyAlarmMinute() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt(_dailyAlarmMinuteKey) ?? 0;
+  }
+
+  Future<void> setDailyAlarmTime(int hour, int minute) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_dailyAlarmHourKey, hour);
+    await prefs.setInt(_dailyAlarmMinuteKey, minute);
   }
 }
