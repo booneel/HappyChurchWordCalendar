@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:date_pdf/services/pdf_catalog_service.dart';
+import 'package:wordcalendar/services/pdf_catalog_service.dart';
 
 void main() {
   final service = PdfCatalogService.instance;

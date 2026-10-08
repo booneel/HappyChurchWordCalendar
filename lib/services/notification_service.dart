@@ -25,8 +25,8 @@ class NotificationService {
   static final NotificationService instance = NotificationService._();
 
   static const _deviceIdKey = 'notification_device_id';
-  static const _channelId = 'datepdf_updates';
-  static const _channelName = 'DatePDF 업데이트';
+  static const _channelId = 'wordcalendar_updates';
+  static const _channelName = 'TheWordCalendar 업데이트';
 
   final FlutterLocalNotificationsPlugin _local =
       FlutterLocalNotificationsPlugin();
@@ -397,7 +397,7 @@ class NotificationService {
       const AndroidNotificationChannel(
         _channelId,
         _channelName,
-        description: 'DatePDF Q&A 및 PDF 업데이트 알림',
+        description: 'TheWordCalendar Q&A 및 PDF 업데이트 알림',
         importance: Importance.high,
       ),
     );
@@ -432,7 +432,7 @@ class NotificationService {
           android: AndroidNotificationDetails(
             _channelId,
             _channelName,
-            channelDescription: 'DatePDF 업데이트 알림',
+            channelDescription: 'TheWordCalendar 업데이트 알림',
             importance: Importance.high,
             priority: Priority.high,
             icon: '@mipmap/ic_launcher',

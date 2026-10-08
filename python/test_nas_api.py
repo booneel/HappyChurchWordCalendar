@@ -2,15 +2,16 @@
 
 import importlib
 from io import BytesIO
+import sqlite3
 
 from fastapi.testclient import TestClient
 from pypdf import PdfWriter
 
 
 def test_nas_api_end_to_end(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATEPDF_NAS_ROOT", str(tmp_path))
-    monkeypatch.setenv("DATEPDF_NAS_TOKEN", "r" * 48)
-    monkeypatch.setenv("DATEPDF_NAS_ADMIN_TOKEN", "a" * 48)
+    monkeypatch.setenv("WORDCALENDAR_NAS_ROOT", str(tmp_path))
+    monkeypatch.setenv("WORDCALENDAR_NAS_TOKEN", "r" * 48)
+    monkeypatch.setenv("WORDCALENDAR_NAS_ADMIN_TOKEN", "a" * 48)
     import nas_api
 
     api = importlib.reload(nas_api)
@@ -99,11 +100,11 @@ def test_nas_api_end_to_end(tmp_path, monkeypatch):
 
 
 def test_qna_answer_succeeds_when_push_relay_is_unavailable(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATEPDF_NAS_ROOT", str(tmp_path))
-    monkeypatch.setenv("DATEPDF_NAS_TOKEN", "r" * 48)
-    monkeypatch.setenv("DATEPDF_NAS_ADMIN_TOKEN", "a" * 48)
-    monkeypatch.setenv("DATEPDF_NAS_PUSH_URL", "http://127.0.0.1:1/notify")
-    monkeypatch.setenv("DATEPDF_NAS_PUSH_SECRET", "s" * 48)
+    monkeypatch.setenv("WORDCALENDAR_NAS_ROOT", str(tmp_path))
+    monkeypatch.setenv("WORDCALENDAR_NAS_TOKEN", "r" * 48)
+    monkeypatch.setenv("WORDCALENDAR_NAS_ADMIN_TOKEN", "a" * 48)
+    monkeypatch.setenv("WORDCALENDAR_NAS_PUSH_URL", "http://127.0.0.1:1/notify")
+    monkeypatch.setenv("WORDCALENDAR_NAS_PUSH_SECRET", "s" * 48)
     import nas_api
 
     api = importlib.reload(nas_api)
@@ -121,3 +122,33 @@ def test_qna_answer_succeeds_when_push_relay_is_unavailable(tmp_path, monkeypatc
         assert answered.status_code == 200
         assert answered.json()["isAnswered"] is True
         assert client.get("/api/qna", headers=user).json()["items"][0]["answer"] == "The NAS saved this answer."
+
+
+def test_old_database_is_migrated_to_wordcalendar_name(tmp_path, monkeypatch):
+    data = tmp_path / "data"
+    data.mkdir()
+    old_database = data / "datepdf.sqlite3"
+    connection = sqlite3.connect(old_database)
+    connection.execute("CREATE TABLE preserved (value TEXT NOT NULL)")
+    connection.execute("INSERT INTO preserved VALUES ('existing data')")
+    connection.commit()
+    connection.close()
+
+    monkeypatch.setenv("WORDCALENDAR_NAS_ROOT", str(tmp_path))
+    monkeypatch.setenv("WORDCALENDAR_NAS_TOKEN", "r" * 48)
+    monkeypatch.setenv("WORDCALENDAR_NAS_ADMIN_TOKEN", "a" * 48)
+    import nas_api
+
+    api = importlib.reload(nas_api)
+    with TestClient(api.app) as client:
+        response = client.get("/api/admin/check", headers={"Authorization": "Bearer " + "a" * 48})
+        assert response.status_code == 200
+
+    new_database = data / "wordcalendar.sqlite3"
+    assert new_database.exists()
+    assert not old_database.exists()
+    migrated_backup = data / "wordcalendar.sqlite3.pre-rename-backup"
+    assert migrated_backup.exists()
+    connection = sqlite3.connect(new_database)
+    assert connection.execute("SELECT value FROM preserved").fetchone() == ("existing data",)
+    connection.close()

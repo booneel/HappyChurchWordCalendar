@@ -86,7 +86,7 @@ class ViewHistoryService {
   void _init() {
     _getLocalPageViews().then((_) => _emitTopPages());
 
-    // Widget tests can mount DatePdfApp without running main(), so Firebase
+    // Widget tests can mount TheWordCalendarApp without running main(), so Firebase
     // may not have an app yet. In that case local history remains available
     // and the remote listener is attached after normal app initialization.
     if (BackendConfig.useNas) {

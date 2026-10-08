@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -54,15 +56,19 @@ Future<void> main() async {
     );
   }
 
-  await NotificationService.instance.initialize(firebaseEnabled: firebaseReady);
-
   runApp(
-    const DatePdfApp(),
+    const TheWordCalendarApp(),
+  );
+
+  // Network-backed auth, FCM token, or permission setup must not hold the
+  // Flutter splash screen open when a Firebase project is still being set up.
+  unawaited(
+    NotificationService.instance.initialize(firebaseEnabled: firebaseReady),
   );
 }
 
-class DatePdfApp extends StatelessWidget {
-  const DatePdfApp({
+class TheWordCalendarApp extends StatelessWidget {
+  const TheWordCalendarApp({
     super.key,
   });
 
@@ -71,7 +77,7 @@ class DatePdfApp extends StatelessWidget {
     BuildContext context,
   ) {
     return MaterialApp(
-      title: 'DatePDF',
+      title: 'TheWordCalendar',
       debugShowCheckedModeBanner: false,
       locale: const Locale('ko', 'KR'),
       supportedLocales: const [

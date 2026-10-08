@@ -1,6 +1,6 @@
-"""Small self-hosted DatePDF API for a NAS or a home server.
+"""Small self-hosted TheWordCalendar API for a NAS or a home server.
 
-The Flutter app talks to this service when DATEPDF_BACKEND=nas. It keeps the
+The Flutter app talks to this service when WORDCALENDAR_BACKEND=nas. It keeps the
 same JSON field names as the Firebase implementation. Metadata remains in
 small JSON files, while counters and QnA use SQLite so concurrent requests do
 not overwrite one another.
@@ -32,19 +32,20 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-ROOT = Path(os.getenv("DATEPDF_NAS_ROOT", "./nas-data")).resolve()
+ROOT = Path(os.getenv("WORDCALENDAR_NAS_ROOT", "./nas-data")).resolve()
 DATA = ROOT / "data"
 BACKUPS = ROOT / "backups"
-TOKEN = os.getenv("DATEPDF_NAS_TOKEN", "").strip()
-ADMIN_TOKEN = os.getenv("DATEPDF_NAS_ADMIN_TOKEN", "").strip()
-PUSH_RELAY_URL = os.getenv("DATEPDF_NAS_PUSH_URL", "").strip()
-PUSH_RELAY_SECRET = os.getenv("DATEPDF_NAS_PUSH_SECRET", "").strip()
+TOKEN = os.getenv("WORDCALENDAR_NAS_TOKEN", "").strip()
+ADMIN_TOKEN = os.getenv("WORDCALENDAR_NAS_ADMIN_TOKEN", "").strip()
+PUSH_RELAY_URL = os.getenv("WORDCALENDAR_NAS_PUSH_URL", "").strip()
+PUSH_RELAY_SECRET = os.getenv("WORDCALENDAR_NAS_PUSH_SECRET", "").strip()
 PDF = DATA / "current.pdf"
 CATALOG = DATA / "catalog.json"
 SETTINGS = DATA / "settings.json"
 QNA = DATA / "qna.json"
 STATS = DATA / "stats.json"
-DATABASE = DATA / "datepdf.sqlite3"
+DATABASE = DATA / "wordcalendar.sqlite3"
+LEGACY_DATABASE = DATA / "datepdf.sqlite3"
 PDF_META = DATA / "pdf_metadata.json"
 WRITE_LOCK = threading.RLock()
 
@@ -68,12 +69,12 @@ async def notify_nas_push(event: dict[str, Any]) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     if len(TOKEN) < 32 or len(ADMIN_TOKEN) < 32 or TOKEN == ADMIN_TOKEN:
-        raise RuntimeError("Set distinct DATEPDF_NAS_TOKEN and DATEPDF_NAS_ADMIN_TOKEN (at least 32 characters each)")
+        raise RuntimeError("Set distinct WORDCALENDAR_NAS_TOKEN and WORDCALENDAR_NAS_ADMIN_TOKEN (at least 32 characters each)")
     ensure_store()
     yield
 
 
-app = FastAPI(title="DatePDF NAS API", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="TheWordCalendar NAS API", version="1.0.0", lifespan=lifespan)
 
 
 class CatalogPayload(BaseModel):
@@ -119,6 +120,7 @@ class QuestionPayload(BaseModel):
 def ensure_store() -> None:
     DATA.mkdir(parents=True, exist_ok=True)
     BACKUPS.mkdir(parents=True, exist_ok=True)
+    migrate_legacy_database()
     if not CATALOG.exists():
         atomic_json(CATALOG, CatalogPayload().model_dump())
     if not SETTINGS.exists():
@@ -128,6 +130,40 @@ def ensure_store() -> None:
     if not STATS.exists():
         atomic_json(STATS, {})
     initialize_database()
+
+
+def migrate_legacy_database() -> None:
+    """Copy the old database into the new name before serving any requests."""
+    if not LEGACY_DATABASE.exists():
+        return
+    if DATABASE.exists():
+        raise RuntimeError(
+            "Both datepdf.sqlite3 and wordcalendar.sqlite3 exist. Stop the API, "
+            "back up /data, and resolve the two database files before restarting."
+        )
+
+    source = sqlite3.connect(LEGACY_DATABASE)
+    target = sqlite3.connect(DATABASE)
+    try:
+        source.backup(target)
+        result = target.execute("PRAGMA integrity_check").fetchone()
+        if result is None or result[0] != "ok":
+            raise RuntimeError("The migrated wordcalendar.sqlite3 failed its integrity check")
+    except Exception:
+        target.close()
+        source.close()
+        DATABASE.unlink(missing_ok=True)
+        raise
+    else:
+        target.close()
+        source.close()
+
+    migrated_backup = LEGACY_DATABASE.with_name("wordcalendar.sqlite3.pre-rename-backup")
+    if migrated_backup.exists():
+        migrated_backup = LEGACY_DATABASE.with_name(
+            f"wordcalendar.sqlite3.pre-rename-backup-{int(datetime.now().timestamp())}"
+        )
+    LEGACY_DATABASE.replace(migrated_backup)
 
 
 def read_json(path: Path, default: Any) -> Any:
@@ -535,7 +571,7 @@ if __name__ == "__main__":
 
     uvicorn.run(
         "nas_api:app",
-        host=os.getenv("DATEPDF_NAS_HOST", "0.0.0.0"),
-        port=int(os.getenv("DATEPDF_NAS_PORT", "8787")),
+        host=os.getenv("WORDCALENDAR_NAS_HOST", "0.0.0.0"),
+        port=int(os.getenv("WORDCALENDAR_NAS_PORT", "8787")),
         reload=False,
     )

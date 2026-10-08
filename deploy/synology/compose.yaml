@@ -1,16 +1,16 @@
 services:
-  datepdf-api:
+  wordcalendar-api:
     build:
       context: ./app
       dockerfile: Dockerfile.nas
     restart: unless-stopped
     env_file: .env
     environment:
-      DATEPDF_NAS_ROOT: /data
-      DATEPDF_NAS_HOST: 0.0.0.0
-      DATEPDF_NAS_PORT: 8787
+      WORDCALENDAR_NAS_ROOT: /data
+      WORDCALENDAR_NAS_HOST: 0.0.0.0
+      WORDCALENDAR_NAS_PORT: 8787
     volumes:
-      - /volume1/datepdf-data:/data
+      - /volume1/wordcalendar-data:/data
     ports:
       - "127.0.0.1:8787:8787"
     security_opt:

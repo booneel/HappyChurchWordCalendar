@@ -304,7 +304,7 @@ def main() -> None:
     load_dotenv()
 
     parser = argparse.ArgumentParser(
-        description="DatePDF 365일 묵상 제목 AI Vision 일괄 추출기"
+        description="TheWordCalendar 365일 묵상 제목 AI Vision 일괄 추출기"
     )
     parser.add_argument(
         "--pdf",

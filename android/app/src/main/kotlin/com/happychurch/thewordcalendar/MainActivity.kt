@@ -1,4 +1,4 @@
-package com.example.date_pdf
+package com.happychurch.thewordcalendar
 
 import io.flutter.embedding.android.FlutterActivity
 

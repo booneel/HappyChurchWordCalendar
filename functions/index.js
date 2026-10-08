@@ -53,7 +53,7 @@ async function sendAdminQnaEmail({ questionId, data }) {
   const title = data.title || '제목 없는 질문';
   const content = data.content || '';
   const authorName = data.authorName || '익명';
-  const subject = `[DatePDF] 새 Q&A 질문: ${shortText(title, 100)}`;
+  const subject = `[TheWordCalendar] 새 Q&A 질문: ${shortText(title, 100)}`;
   const text = [
     '새 Q&A 질문이 등록되었습니다.',
     '',
@@ -63,7 +63,7 @@ async function sendAdminQnaEmail({ questionId, data }) {
     `질문 ID: ${questionId}`,
   ].join('\n');
   const html = [
-    '<h2>DatePDF 새 Q&A 질문</h2>',
+    '<h2>TheWordCalendar 새 Q&A 질문</h2>',
     `<p><strong>제목:</strong> ${escapeHtml(title)}</p>`,
     `<p><strong>작성자:</strong> ${escapeHtml(authorName)}</p>`,
     `<p><strong>내용:</strong><br>${escapeHtml(content).replaceAll('\n', '<br>')}</p>`,
@@ -98,7 +98,7 @@ async function sendToTokens({ tokens, title, body, type, questionId }) {
     },
     android: {
       priority: 'high',
-      notification: { channelId: 'datepdf_updates' },
+      notification: { channelId: 'wordcalendar_updates' },
     },
     apns: {
       payload: { aps: { sound: 'default' } },

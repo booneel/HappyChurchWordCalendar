@@ -1,21 +1,21 @@
 {
   "project_info": {
-    "project_number": "161414604855",
-    "project_id": "date-pdf",
-    "storage_bucket": "date-pdf.firebasestorage.app"
+    "project_number": "669661440067",
+    "project_id": "thewordcalendar-f768c",
+    "storage_bucket": "thewordcalendar-f768c.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:161414604855:android:002244138c54bdbc0337b2",
+        "mobilesdk_app_id": "1:669661440067:android:dbfa8a6d3718f3e126ccf6",
         "android_client_info": {
-          "package_name": "com.example.date_pdf"
+          "package_name": "com.happychurch.thewordcalendar"
         }
       },
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyBsqS7MXy3PKwcoOqSWyH7RnR2oqSLvroU"
+          "current_key": "AIzaSyDwg8wbIisLTn8TxaF8G__sMRMUvgO6bPw"
         }
       ],
       "services": {

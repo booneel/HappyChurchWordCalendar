@@ -7,7 +7,7 @@ import 'package:http/http.dart' as http;
 
 import 'backend_config.dart';
 
-/// Small HTTP client for a self-hosted DatePDF NAS API.
+/// Small HTTP client for a self-hosted TheWordCalendar NAS API.
 ///
 /// The API is intentionally boring: JSON for metadata and catalog/statistics,
 /// and one PDF endpoint. This makes it possible to host it with Node, PHP,

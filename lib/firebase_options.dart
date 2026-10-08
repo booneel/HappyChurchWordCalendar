@@ -50,19 +50,18 @@ class DefaultFirebaseOptions {
   }
 
   static const FirebaseOptions android = FirebaseOptions(
-    apiKey: 'AIzaSyBsqS7MXy3PKwcoOqSWyH7RnR2oqSLvroU',
-    appId: '1:161414604855:android:002244138c54bdbc0337b2',
-    messagingSenderId: '161414604855',
-    projectId: 'date-pdf',
-    storageBucket: 'date-pdf.firebasestorage.app',
+    apiKey: 'AIzaSyDwg8wbIisLTn8TxaF8G__sMRMUvgO6bPw',
+    appId: '1:669661440067:android:dbfa8a6d3718f3e126ccf6',
+    messagingSenderId: '669661440067',
+    projectId: 'thewordcalendar-f768c',
+    storageBucket: 'thewordcalendar-f768c.firebasestorage.app',
   );
-
   static const FirebaseOptions ios = FirebaseOptions(
-    apiKey: 'AIzaSyD4WMQEDjwu-B1LkTESTIcp5C7Ju7KjiS4',
-    appId: '1:161414604855:ios:3749c3d144d8fb3b0337b2',
-    messagingSenderId: '161414604855',
-    projectId: 'date-pdf',
-    storageBucket: 'date-pdf.firebasestorage.app',
-    iosBundleId: 'com.example.datePdf',
+    apiKey: 'AIzaSyAfhS4wT_vX6Qf0cA4wfV-Sro0lnFaKcv0',
+    appId: '1:669661440067:ios:60d30eb86455b02c26ccf6',
+    messagingSenderId: '669661440067',
+    projectId: 'thewordcalendar-f768c',
+    storageBucket: 'thewordcalendar-f768c.firebasestorage.app',
+    iosBundleId: 'com.happychurch.thewordcalendar',
   );
 }

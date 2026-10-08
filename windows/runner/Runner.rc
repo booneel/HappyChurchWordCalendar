@@ -90,12 +90,12 @@ BEGIN
         BLOCK "040904e4"
         BEGIN
             VALUE "CompanyName", "com.example" "\0"
-            VALUE "FileDescription", "date_pdf" "\0"
+            VALUE "FileDescription", "wordcalendar" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "date_pdf" "\0"
+            VALUE "InternalName", "wordcalendar" "\0"
             VALUE "LegalCopyright", "Copyright (C) 2026 com.example. All rights reserved." "\0"
-            VALUE "OriginalFilename", "date_pdf.exe" "\0"
-            VALUE "ProductName", "date_pdf" "\0"
+            VALUE "OriginalFilename", "wordcalendar.exe" "\0"
+            VALUE "ProductName", "wordcalendar" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

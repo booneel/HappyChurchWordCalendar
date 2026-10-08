@@ -11,7 +11,7 @@ HTML_TEMPLATE = """<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>DatePDF 제목 검수</title>
+<title>TheWordCalendar 제목 검수</title>
 <style>
 body {{ font-family: Arial, "Malgun Gothic", sans-serif; margin: 0; background:#f4f6f9; color:#20242a; }}
 header {{ position:sticky; top:0; background:white; border-bottom:1px solid #ddd; padding:16px 22px; z-index:10; display:flex; gap:18px; align-items:center; }}
@@ -31,7 +31,7 @@ input {{ width:100%; box-sizing:border-box; font-size:18px; padding:12px; border
 </head>
 <body>
 <header>
-  <strong>DatePDF 제목 검수</strong>
+  <strong>TheWordCalendar 제목 검수</strong>
   <span>총 {count}개</span>
   <span>낮은 확신 {low_count}개</span>
   <button onclick="downloadJson()">수정 JSON 다운로드</button>

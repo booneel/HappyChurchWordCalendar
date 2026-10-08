@@ -1,5 +1,5 @@
-name: date_pdf
-description: DatePDF - date based PDF viewer with admin mode.
+name: wordcalendar
+description: TheWordCalendar - daily Scripture calendar and PDF viewer.
 publish_to: "none"
 version: 1.0.0+1
 

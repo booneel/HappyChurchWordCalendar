@@ -12,11 +12,11 @@ pause
 exit /b 1
 
 :use_py
-py -3 -c "import secrets; print('DATEPDF_NAS_TOKEN='+secrets.token_urlsafe(48)); print('DATEPDF_NAS_ADMIN_TOKEN='+secrets.token_urlsafe(48)); print('DATEPDF_NAS_PUSH_SECRET='+secrets.token_urlsafe(48))"
+py -3 -c "import secrets; print('WORDCALENDAR_NAS_TOKEN='+secrets.token_urlsafe(48)); print('WORDCALENDAR_NAS_ADMIN_TOKEN='+secrets.token_urlsafe(48)); print('WORDCALENDAR_NAS_PUSH_SECRET='+secrets.token_urlsafe(48))"
 goto done
 
 :use_python
-python -c "import secrets; print('DATEPDF_NAS_TOKEN='+secrets.token_urlsafe(48)); print('DATEPDF_NAS_ADMIN_TOKEN='+secrets.token_urlsafe(48)); print('DATEPDF_NAS_PUSH_SECRET='+secrets.token_urlsafe(48))"
+python -c "import secrets; print('WORDCALENDAR_NAS_TOKEN='+secrets.token_urlsafe(48)); print('WORDCALENDAR_NAS_ADMIN_TOKEN='+secrets.token_urlsafe(48)); print('WORDCALENDAR_NAS_PUSH_SECRET='+secrets.token_urlsafe(48))"
 
 :done
 echo.

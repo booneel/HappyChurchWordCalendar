@@ -10,7 +10,7 @@ from firebase_admin import credentials, firestore
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="DatePDF 제목 JSON을 Firestore pdf_catalog/current에 업로드"
+        description="TheWordCalendar 제목 JSON을 Firestore pdf_catalog/current에 업로드"
     )
     parser.add_argument(
         "--input",
@@ -24,7 +24,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--project-id",
-        default="date-pdf",
+        default="thewordcalendar-f768c",
     )
     args = parser.parse_args()
 

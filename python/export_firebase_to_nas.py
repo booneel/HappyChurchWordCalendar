@@ -1,10 +1,10 @@
 """Export Firebase data before the first NAS API start.
 
 Example: python export_firebase_to_nas.py --service-account service-account.json \
-  --bucket date-pdf.firebasestorage.app --output ./firebase-export
+  --bucket thewordcalendar-f768c.firebasestorage.app --output ./firebase-export
 
 Keep the service account and export directory private. Stop app writes while
-exporting, then copy the output files into /volume1/datepdf-data/data/.
+exporting, then copy the output files into /volume1/wordcalendar-data/data/.
 """
 
 import argparse
