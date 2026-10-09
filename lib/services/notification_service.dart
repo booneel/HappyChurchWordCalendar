@@ -7,7 +7,10 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:timezone/data/latest_all.dart' as tz;
+import 'package:timezone/timezone.dart' as tz;
 
 import 'backend_config.dart';
 import 'local_profile_service.dart';
@@ -48,6 +51,7 @@ class NotificationService {
   bool _qnaLoaded = false;
   bool _initialized = false;
   bool _localReady = false;
+  bool _timeZonesInitialized = false;
 
   Future<void> initialize({required bool firebaseEnabled}) async {
     if (_initialized) return;
@@ -55,6 +59,7 @@ class NotificationService {
 
     try {
       await _ensureLocalNotifications();
+      await _restoreDailyAlarmIfEnabled();
     } catch (error, stackTrace) {
       debugPrint('Local notification initialization failed: $error');
       debugPrintStack(stackTrace: stackTrace);
@@ -457,6 +462,100 @@ class NotificationService {
   }
 
   String _safeDocumentId(String token) => token.replaceAll('/', '_');
+
+  Future<void> updateDailyAlarmSchedule({
+    required bool enabled,
+    required int hour,
+    required int minute,
+    bool requestExactAlarmPermission = false,
+  }) async {
+    const alarmId = 1001;
+    try {
+      await _local.cancel(id: alarmId);
+      if (!enabled) return;
+
+      if (!_localReady) {
+        await _ensureLocalNotifications();
+      }
+
+      if (!_timeZonesInitialized) {
+        tz.initializeTimeZones();
+        _timeZonesInitialized = true;
+      }
+      final timeZone = await FlutterTimezone.getLocalTimezone();
+      tz.setLocalLocation(tz.getLocation(timeZone.identifier));
+
+      final androidPlugin = _local.resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin>();
+      var exactAlarmsAllowed =
+          await androidPlugin?.canScheduleExactNotifications() ?? true;
+      if (!exactAlarmsAllowed && requestExactAlarmPermission) {
+        exactAlarmsAllowed =
+            await androidPlugin?.requestExactAlarmsPermission() ?? false;
+      }
+
+      final now = tz.TZDateTime.now(tz.local);
+      var scheduledDate = tz.TZDateTime(
+        tz.local,
+        now.year,
+        now.month,
+        now.day,
+        hour,
+        minute,
+      );
+      if (!scheduledDate.isAfter(now)) {
+        scheduledDate = tz.TZDateTime(
+          tz.local,
+          now.year,
+          now.month,
+          now.day + 1,
+          hour,
+          minute,
+        );
+      }
+
+      await _local.zonedSchedule(
+        id: alarmId,
+        scheduledDate: scheduledDate,
+        title: '오늘의 말씀 📖',
+        body: '오늘의 말씀과 묵상을 확인해보세요!',
+        notificationDetails: const NotificationDetails(
+          android: AndroidNotificationDetails(
+            _channelId,
+            _channelName,
+            channelDescription: 'Daily alarm notification',
+            importance: Importance.high,
+            priority: Priority.high,
+            icon: '@mipmap/ic_launcher',
+          ),
+          iOS: DarwinNotificationDetails(
+            presentAlert: true,
+            presentBadge: true,
+            presentSound: true,
+          ),
+        ),
+        androidScheduleMode: exactAlarmsAllowed
+            ? AndroidScheduleMode.exactAllowWhileIdle
+            : AndroidScheduleMode.inexact,
+        matchDateTimeComponents: DateTimeComponents.time,
+      );
+    } catch (error, stackTrace) {
+      debugPrint('Daily alarm scheduling failed: $error');
+      debugPrintStack(stackTrace: stackTrace);
+    }
+  }
+
+  Future<void> _restoreDailyAlarmIfEnabled() async {
+    final enabled = await _profile.isDailyAlarmEnabled();
+    if (!enabled) return;
+    final hour = await _profile.getDailyAlarmHour();
+    final minute = await _profile.getDailyAlarmMinute();
+    await updateDailyAlarmSchedule(
+      enabled: enabled,
+      hour: hour,
+      minute: minute,
+    );
+  }
 
   Future<void> dispose() async {
     await _messageSubscription?.cancel();

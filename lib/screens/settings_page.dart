@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../services/admin_service.dart';
 import '../services/local_profile_service.dart';
+import '../services/notification_service.dart';
 import 'admin_code_page.dart';
 import 'admin_page.dart';
 import 'recent_history_page.dart';
@@ -97,7 +98,7 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
         ],
       ),
-    ).whenComplete(controller.dispose);
+    );
 
     if (value != null && value.isNotEmpty) {
       await profile.saveName(value);
@@ -121,6 +122,12 @@ class _SettingsPageState extends State<SettingsPage> {
   Future<void> _setDailyAlarmEnabled(bool value) async {
     setState(() => dailyAlarmEnabled = value);
     await profile.setDailyAlarmEnabled(value);
+    await NotificationService.instance.updateDailyAlarmSchedule(
+      enabled: value,
+      hour: dailyAlarmTime.hour,
+      minute: dailyAlarmTime.minute,
+      requestExactAlarmPermission: value,
+    );
   }
 
   Future<void> _pickDailyAlarmTime() async {
@@ -136,6 +143,12 @@ class _SettingsPageState extends State<SettingsPage> {
       });
       await profile.setDailyAlarmEnabled(true);
       await profile.setDailyAlarmTime(picked.hour, picked.minute);
+      await NotificationService.instance.updateDailyAlarmSchedule(
+        enabled: true,
+        hour: picked.hour,
+        minute: picked.minute,
+        requestExactAlarmPermission: true,
+      );
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

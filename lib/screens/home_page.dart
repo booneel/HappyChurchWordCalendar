@@ -89,36 +89,50 @@ class _HomePageState extends State<HomePage> {
     if (!mounted) return;
     setState(() {
       dataFuture = next;
+      _pdfFuture = PdfCacheService().getCachedPdf(forceRefresh: true);
     });
     await next;
   }
 
+  bool _isOpening = false;
+
   Future<void> _openPdf({required int page, required DateTime date}) async {
-    if (!DatePageMapper.isDailyPage(page)) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('해당 날짜에 연결된 PDF 페이지가 없습니다.')),
-        );
+    if (_isOpening) return;
+    _isOpening = true;
+
+    try {
+      if (!DatePageMapper.isDailyPage(page)) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('해당 날짜에 연결된 PDF 페이지가 없습니다.')),
+          );
+        }
+        return;
       }
-      return;
+
+      // 직접 눌러서 들어간 경우에만 조회수 +1.
+      await history.recordDirectOpen(page: page, date: date);
+
+      final title = catalogService.formatTitleForDate(date);
+
+      if (!mounted) return;
+
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => PdfPage(title: title, page: page, year: date.year),
+        ),
+      );
+
+      if (!mounted) return;
+      await _refresh();
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isOpening = false;
+        });
+      }
     }
-
-    // 직접 눌러서 들어간 경우에만 조회수 +1.
-    await history.recordDirectOpen(page: page, date: date);
-
-    final title = catalogService.formatTitleForDate(date);
-
-    if (!mounted) return;
-
-    await Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => PdfPage(title: title, page: page, year: date.year),
-      ),
-    );
-
-    if (!mounted) return;
-    await _refresh();
   }
 
   @override

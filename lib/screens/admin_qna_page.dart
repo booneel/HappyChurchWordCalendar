@@ -159,7 +159,7 @@ class _AdminQnaPageState extends State<AdminQnaPage> {
             ),
         ],
       ),
-    ).whenComplete(answerController.dispose);
+    );
   }
 
   Future<void> _confirmAndDeleteQuestion(

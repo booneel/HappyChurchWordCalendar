@@ -354,7 +354,7 @@ confidence를 넣으면 검수 필요 여부에 반영합니다.'''),
           ),
         ],
       ),
-    ).whenComplete(controller.dispose);
+    );
 
     if (value == null) return;
 

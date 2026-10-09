@@ -234,6 +234,18 @@ class _SinglePagePdfViewerState extends State<_SinglePagePdfViewer> {
   }
 
   @override
+  void didUpdateWidget(covariant _SinglePagePdfViewer oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.scrollDirection != widget.scrollDirection) {
+      final currentIdx = _pageController?.hasClients == true
+          ? _pageController?.page?.round() ?? (widget.initialPage - 1)
+          : (widget.initialPage - 1);
+      _pageController?.dispose();
+      _pageController = PageController(initialPage: currentIdx);
+    }
+  }
+
+  @override
   void dispose() {
     _pageController?.dispose();
     unawaited(_disposeDocument());
@@ -278,6 +290,7 @@ class _SinglePagePdfViewerState extends State<_SinglePagePdfViewer> {
         return Container(
           color: const Color(0xff202124),
           child: PageView.builder(
+            key: ValueKey('pageview_${widget.scrollDirection}'),
             controller: _pageController,
             physics: const BouncingScrollPhysics(), // 다음/이전 말씀 페이지 스와이프 이동 허용
             scrollDirection: widget.scrollDirection,
