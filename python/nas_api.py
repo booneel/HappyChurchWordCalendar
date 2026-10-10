@@ -453,15 +453,15 @@ def put_settings(payload: SettingsPayload) -> dict[str, Any]:
 
 @app.get("/api/qna", dependencies=[Depends(require_auth)])
 def get_qna() -> dict[str, Any]:
-    return _read_qna_items(include_author=False)
+    return _read_qna_items(include_admin_fields=False)
 
 
 @app.get("/api/admin/qna", dependencies=[Depends(require_admin)])
 def get_admin_qna() -> dict[str, Any]:
-    return _read_qna_items(include_author=True)
+    return _read_qna_items(include_admin_fields=True)
 
 
-def _read_qna_items(*, include_author: bool) -> dict[str, Any]:
+def _read_qna_items(*, include_admin_fields: bool) -> dict[str, Any]:
     with database() as connection:
         rows = connection.execute(
             "SELECT payload FROM qna ORDER BY created_at DESC LIMIT 50"
@@ -474,8 +474,7 @@ def _read_qna_items(*, include_author: bool) -> dict[str, Any]:
             continue
         if isinstance(item, dict):
             item.pop("notificationToken", None)
-            if not include_author:
-                item.pop("authorName", None)
+            if not include_admin_fields:
                 # Keep the opaque device ID for answer-notification targeting.
                 item.pop("isReadByAdmin", None)
             items.append(item)

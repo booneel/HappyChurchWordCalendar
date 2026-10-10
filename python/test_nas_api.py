@@ -82,9 +82,11 @@ def test_nas_api_end_to_end(tmp_path, monkeypatch):
                           json={"authorDeviceId": "hijack"}).status_code == 400
 
         public_items = client.get("/api/qna", headers=user).json()["items"]
-        assert "authorName" not in public_items[0]
+        assert isinstance(public_items[0].get("authorName"), str)
+        assert "isReadByAdmin" not in public_items[0]
         assert "notificationToken" not in public_items[0]
         admin_items = client.get("/api/admin/qna", headers=admin).json()["items"]
+        assert public_items[0]["authorName"] == admin_items[0]["authorName"]
         assert admin_items[0]["authorName"] == "사용자"
         assert admin_items[0]["authorDeviceId"] == "device"
         assert "notificationToken" not in admin_items[0]

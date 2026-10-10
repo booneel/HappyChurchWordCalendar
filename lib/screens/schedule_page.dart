@@ -88,20 +88,42 @@ class _SchedulePageState extends State<SchedulePage> {
     return DateTime(year, month + 1, 0).day;
   }
 
-  Future<void> _showYearMonthPicker() async {
-    final picked = await showDialog<DateTime>(
+  Future<void> _showYearPicker() async {
+    final year = await showDialog<int>(
       context: context,
-      builder: (context) => _YearMonthPickerDialog(
-        initialYear: selected.year,
-        initialMonth: selected.month,
+      builder: (context) => _NumberGridPickerDialog(
+        title: '연도 선택',
+        values: List.generate(16, (index) => 2020 + index),
+        selectedValue: selected.year,
+        suffix: '년',
       ),
     );
 
-    if (picked != null) {
-      final maxDay = _daysInMonth(picked.year, picked.month);
+    if (year != null) {
+      final maxDay = _daysInMonth(year, selected.month);
       final day = selected.day.clamp(1, maxDay);
       setState(() {
-        selected = DateTime(picked.year, picked.month, day);
+        selected = DateTime(year, selected.month, day);
+      });
+    }
+  }
+
+  Future<void> _showMonthPicker() async {
+    final month = await showDialog<int>(
+      context: context,
+      builder: (context) => _NumberGridPickerDialog(
+        title: '월 선택',
+        values: List.generate(12, (index) => index + 1),
+        selectedValue: selected.month,
+        suffix: '월',
+      ),
+    );
+
+    if (month != null) {
+      final maxDay = _daysInMonth(selected.year, month);
+      final day = selected.day.clamp(1, maxDay);
+      setState(() {
+        selected = DateTime(selected.year, month, day);
       });
     }
   }
@@ -151,48 +173,32 @@ class _SchedulePageState extends State<SchedulePage> {
                   ),
                 ],
               ),
-              // 깔끔한 연도/월 빠른 선택 버튼
-              InkWell(
-                borderRadius: BorderRadius.circular(14),
-                onTap: _showYearMonthPicker,
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.primaryContainer,
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.calendar_month,
-                        size: 18,
-                        color: Theme.of(context).colorScheme.primary,
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        '${selected.year}년 ${selected.month}월',
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w800,
-                          color: Theme.of(context).colorScheme.primary,
-                        ),
-                      ),
-                      const SizedBox(width: 4),
-                      Icon(
-                        Icons.arrow_drop_down,
-                        size: 20,
-                        color: Theme.of(context).colorScheme.primary,
-                      ),
-                    ],
-                  ),
+            ],
+          ),
+
+          const SizedBox(height: 16),
+
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _showYearPicker,
+                  icon: const Icon(Icons.event_outlined),
+                  label: Text('${selected.year}년'),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _showMonthPicker,
+                  icon: const Icon(Icons.calendar_month_outlined),
+                  label: Text('${selected.month}월'),
                 ),
               ),
             ],
           ),
 
-          const SizedBox(height: 16),
+          const SizedBox(height: 8),
 
           // 달력 뷰
           GestureDetector(
@@ -238,55 +244,57 @@ class _SchedulePageState extends State<SchedulePage> {
   }
 }
 
-class _YearMonthPickerDialog extends StatefulWidget {
-  final int initialYear;
-  final int initialMonth;
+class _NumberGridPickerDialog extends StatelessWidget {
+  final String title;
+  final List<int> values;
+  final int selectedValue;
+  final String suffix;
 
-  const _YearMonthPickerDialog({
-    required this.initialYear,
-    required this.initialMonth,
+  const _NumberGridPickerDialog({
+    required this.title,
+    required this.values,
+    required this.selectedValue,
+    required this.suffix,
   });
-
-  @override
-  State<_YearMonthPickerDialog> createState() => _YearMonthPickerDialogState();
-}
-
-class _YearMonthPickerDialogState extends State<_YearMonthPickerDialog> {
-  int step = 1; // 1: 연도 선택, 2: 월 선택
-  late int selectedYear;
-  late int selectedMonth;
-
-  @override
-  void initState() {
-    super.initState();
-    selectedYear = widget.initialYear;
-    selectedMonth = widget.initialMonth;
-  }
 
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Row(
-        children: [
-          Expanded(
-            child: Text(
-              step == 1 ? '📅 연도 선택 (1/2단계)' : '📅 $selectedYear년 - 월 선택 (2/2단계)',
-              style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
-            ),
-          ),
-          if (step == 2)
-            TextButton(
-              style: TextButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-              ),
-              onPressed: () => setState(() => step = 1),
-              child: const Text('연도 변경'),
-            ),
-        ],
-      ),
+      title: Text(title),
       content: SizedBox(
         width: double.maxFinite,
-        child: step == 1 ? _buildYearGrid() : _buildMonthGrid(),
+        height: values.length > 12 ? 260 : 220,
+        child: GridView.builder(
+          itemCount: values.length,
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 3,
+            childAspectRatio: 2.2,
+            crossAxisSpacing: 8,
+            mainAxisSpacing: 8,
+          ),
+          itemBuilder: (context, index) {
+            final value = values[index];
+            final isSelected = value == selectedValue;
+            return OutlinedButton(
+              style: OutlinedButton.styleFrom(
+                padding: EdgeInsets.zero,
+                backgroundColor: isSelected
+                    ? Theme.of(context).colorScheme.secondaryContainer
+                    : null,
+                foregroundColor: isSelected
+                    ? Theme.of(context).colorScheme.onSecondaryContainer
+                    : null,
+                side: BorderSide(
+                  color: isSelected
+                      ? Theme.of(context).colorScheme.secondary
+                      : Colors.grey.shade300,
+                ),
+              ),
+              onPressed: () => Navigator.pop(context, value),
+              child: Text('$value$suffix'),
+            );
+          },
+        ),
       ),
       actions: [
         TextButton(
@@ -294,89 +302,6 @@ class _YearMonthPickerDialogState extends State<_YearMonthPickerDialog> {
           child: const Text('취소'),
         ),
       ],
-    );
-  }
-
-  Widget _buildYearGrid() {
-    final years = List.generate(16, (i) => 2020 + i);
-    return GridView.builder(
-      shrinkWrap: true,
-      itemCount: years.length,
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 3,
-        childAspectRatio: 2.2,
-        crossAxisSpacing: 8,
-        mainAxisSpacing: 8,
-      ),
-      itemBuilder: (context, index) {
-        final year = years[index];
-        final isSelected = year == selectedYear;
-        return OutlinedButton(
-          style: OutlinedButton.styleFrom(
-            padding: EdgeInsets.zero,
-            backgroundColor: isSelected
-                ? Theme.of(context).colorScheme.primaryContainer
-                : null,
-            side: BorderSide(
-              color: isSelected
-                  ? Theme.of(context).colorScheme.primary
-                  : Colors.grey.shade300,
-            ),
-          ),
-          onPressed: () {
-            setState(() {
-              selectedYear = year;
-              step = 2; // 연도 선택 후 자동으로 월 선택으로 이동
-            });
-          },
-          child: Text(
-            '$year년',
-            style: TextStyle(
-              fontSize: 14,
-              fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
-              color: isSelected
-                  ? Theme.of(context).colorScheme.primary
-                  : Colors.black87,
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildMonthGrid() {
-    return GridView.builder(
-      shrinkWrap: true,
-      itemCount: 12,
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 3,
-        childAspectRatio: 2.2,
-        crossAxisSpacing: 8,
-        mainAxisSpacing: 8,
-      ),
-      itemBuilder: (context, index) {
-        final month = index + 1;
-        final isSelected = month == selectedMonth;
-        return FilledButton.tonal(
-          style: FilledButton.styleFrom(
-            padding: EdgeInsets.zero,
-            backgroundColor: isSelected
-                ? Theme.of(context).colorScheme.primary
-                : Theme.of(context).colorScheme.surfaceContainerHighest,
-            foregroundColor: isSelected ? Colors.white : Colors.black87,
-          ),
-          onPressed: () {
-            Navigator.pop(
-              context,
-              DateTime(selectedYear, month),
-            );
-          },
-          child: Text(
-            '$month월',
-            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
-          ),
-        );
-      },
     );
   }
 }

@@ -80,6 +80,13 @@ class _QnaPageState extends State<QnaPage> {
                   runSpacing: 2,
                   children: [
                     Text(
+                      '작성자: ${item.authorName}',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey.shade700,
+                      ),
+                    ),
+                    Text(
                       dateFormat.format(item.createdAt),
                       style: TextStyle(
                         fontSize: 12,
@@ -285,6 +292,13 @@ class _QnaPageState extends State<QnaPage> {
                               spacing: 8,
                               runSpacing: 4,
                               children: [
+                                Text(
+                                  '작성자: ${item.authorName}',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.grey.shade700,
+                                  ),
+                                ),
                                 Text(
                                   dateFormat.format(item.createdAt),
                                   style: TextStyle(

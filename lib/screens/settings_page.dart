@@ -122,11 +122,28 @@ class _SettingsPageState extends State<SettingsPage> {
   Future<void> _setDailyAlarmEnabled(bool value) async {
     setState(() => dailyAlarmEnabled = value);
     await profile.setDailyAlarmEnabled(value);
-    await NotificationService.instance.updateDailyAlarmSchedule(
+    final result = await NotificationService.instance.updateDailyAlarmSchedule(
       enabled: value,
       hour: dailyAlarmTime.hour,
       minute: dailyAlarmTime.minute,
       requestExactAlarmPermission: value,
+    );
+    _showAlarmScheduleResult(result);
+  }
+
+  void _showAlarmScheduleResult(DailyAlarmScheduleResult result) {
+    final message = switch (result) {
+      DailyAlarmScheduleResult.scheduled => '매일 알람을 예약했습니다.',
+      DailyAlarmScheduleResult.notificationsPermissionDenied =>
+        '알림 권한이 꺼져 있어 알람을 예약하지 못했습니다. 기기 설정에서 알림을 허용해주세요.',
+      DailyAlarmScheduleResult.exactAlarmPermissionDenied =>
+        '정확한 알람 권한이 꺼져 있어 예약하지 못했습니다. 기기 설정에서 알람 및 리마인더를 허용해주세요.',
+      DailyAlarmScheduleResult.failed => '알람 예약에 실패했습니다. 알림 권한과 설정을 확인해주세요.',
+      DailyAlarmScheduleResult.disabled => '',
+    };
+    if (!mounted || message.isEmpty) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
     );
   }
 
@@ -143,7 +160,8 @@ class _SettingsPageState extends State<SettingsPage> {
       });
       await profile.setDailyAlarmEnabled(true);
       await profile.setDailyAlarmTime(picked.hour, picked.minute);
-      await NotificationService.instance.updateDailyAlarmSchedule(
+      final result =
+          await NotificationService.instance.updateDailyAlarmSchedule(
         enabled: true,
         hour: picked.hour,
         minute: picked.minute,
@@ -151,13 +169,7 @@ class _SettingsPageState extends State<SettingsPage> {
       );
 
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            '⏰ 매일 ${picked.format(context)}에 말씀 알림이 설정되었습니다.',
-          ),
-        ),
-      );
+      _showAlarmScheduleResult(result);
     }
   }
 
@@ -230,7 +242,6 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
           ),
           const SizedBox(height: 20),
-
           const SectionTitle('📖 나의 이용 기록'),
           Card(
             child: ListTile(
@@ -249,7 +260,6 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
           ),
           const SizedBox(height: 20),
-
           const SectionTitle('🔔 알림 설정'),
           Card(
             child: Column(
@@ -292,7 +302,6 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
           ),
           const SizedBox(height: 20),
-
           const SectionTitle('🔐 관리자'),
           Card(
             child: ListTile(
@@ -321,7 +330,6 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
           ],
           const SizedBox(height: 20),
-
           const SectionTitle('ℹ️ 앱 정보'),
           Card(
             child: Column(

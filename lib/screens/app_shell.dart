@@ -9,7 +9,10 @@ import '../services/nas_api_client.dart';
 import '../services/pdf_cache_service.dart';
 import '../services/pdf_catalog_service.dart';
 import '../services/pdf_settings_service.dart';
+import '../services/date_page_mapper.dart';
+import '../services/notification_service.dart';
 import 'home_page.dart';
+import 'pdf_page.dart';
 import 'schedule_page.dart';
 import 'qna_page.dart';
 import 'settings_page.dart';
@@ -32,11 +35,52 @@ class _AppShellState extends State<AppShell> {
   void initState() {
     super.initState();
 
+    NotificationService.instance.dailyAlarmOpened
+        .addListener(_handleDailyAlarmOpened);
+
     _load();
 
     // 사용자 화면에서 기다리지 않도록
     // PDF와 제목 카탈로그를 미리 준비.
     unawaited(_preloadAssets());
+  }
+
+  void _handleDailyAlarmOpened() {
+    final openedAt = NotificationService.instance.dailyAlarmOpened.value;
+    if (openedAt == null) return;
+
+    NotificationService.instance.dailyAlarmOpened.value = null;
+    unawaited(_openDailyPdf(openedAt));
+  }
+
+  Future<void> _openDailyPdf(DateTime date) async {
+    if (!mounted) return;
+
+    setState(() => index = 1);
+    final page = DatePageMapper.pdfPageForDateOrNull(date);
+    if (page == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('해당 날짜에 연결된 PDF 페이지가 없습니다.')),
+      );
+      return;
+    }
+
+    final catalog = PdfCatalogService.instance;
+    try {
+      await catalog.loadTitles();
+    } catch (_) {}
+    if (!mounted) return;
+
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => PdfPage(
+          title: catalog.formatTitleForDate(date),
+          page: page,
+          year: date.year,
+        ),
+      ),
+    );
   }
 
   Future<void> _preloadAssets() async {
@@ -69,6 +113,13 @@ class _AppShellState extends State<AppShell> {
 
       adminMode = admin;
     });
+  }
+
+  @override
+  void dispose() {
+    NotificationService.instance.dailyAlarmOpened
+        .removeListener(_handleDailyAlarmOpened);
+    super.dispose();
   }
 
   Future<void> _openSettings() async {

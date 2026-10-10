@@ -389,3 +389,9 @@ The Flutter package, display labels, Docker Compose service, NAS APK artifact, e
 Before updating an existing NAS install, stop the old Compose project and make a backup of `/volume1/wordcalendar-data`. Rename the keys in `/volume1/docker/wordcalendar/.env` to `WORDCALENDAR_NAS_TOKEN`, `WORDCALENDAR_NAS_ADMIN_TOKEN`, `WORDCALENDAR_NAS_PUSH_URL`, and `WORDCALENDAR_NAS_PUSH_SECRET`; keep each existing value unchanged. The API no longer reads `DATEPDF_*` keys. Redeploy with `deploy_to_nas.bat` or copy the updated files and run `sudo docker compose up -d --build` from `/volume1/docker/wordcalendar`.
 
 On first startup, the API copies `data/datepdf.sqlite3` into `data/wordcalendar.sqlite3`, checks the new database, and retains the original data as `data/wordcalendar.sqlite3.pre-rename-backup`. Check the API logs and test Q&A/view counts before deleting that backup. If both database filenames already exist, the API stops with an error rather than choosing one and risking overwriting data; back up `/data` and resolve the two files manually. The shared data-folder path remains `/volume1/wordcalendar-data`.
+
+## 매일 알람이 울리지 않을 때
+
+알람을 저장하면 앱이 실제 예약 결과를 화면에 표시합니다. `정확한 알람 권한이 꺼져 있어 예약하지 못했습니다`라고 나오면 Android 설정의 `앱 > TheWordCalendar > 알람 및 리마인더`를 허용하고 앱에서 시간을 다시 저장하세요. `알림 권한이 꺼져 있어 알람을 예약하지 못했습니다`라고 나오면 `앱 > TheWordCalendar > 알림`을 허용하고 앱에서 시간을 다시 저장하세요. 정확한 알람 권한이 없으면 정해둔 시각에 울리는 알람은 예약하지 않습니다.
+
+알람 알림은 업데이트 알림과 별도의 `TheWordCalendar 매일 알림` 채널을 사용합니다. 앱 알림 설정에서 이 채널의 알림과 소리가 켜져 있는지, 휴대폰의 무음/방해 금지 모드가 아닌지 확인하세요. 배터리 절약 기능이 백그라운드 예약을 막는 기기에서는 TheWordCalendar를 절전 예외로 지정해야 할 수 있습니다. 앱 정보 화면에서 강제 종료하면 Android가 예약 알람 전달을 막을 수 있으므로 강제 종료하지 말고, 알람 시간을 저장한 뒤 `정확한 알람` 또는 `알람 예약` 안내가 표시되는지 확인하세요.

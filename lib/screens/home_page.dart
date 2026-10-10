@@ -74,7 +74,7 @@ class _HomePageState extends State<HomePage> {
 
   Future<_HomeData> _loadData() async {
     final results = await Future.wait([
-      bookmarkService.getTopBookmarkedPages(limit: 3),
+      history.getTopPages(limit: 3),
       bookmarkService.getBookmarks(),
     ]);
 
@@ -167,7 +167,8 @@ class _HomePageState extends State<HomePage> {
                 : data.topPages
                     .where((item) => dateForPage(item.page) != null)
                     .toList();
-            final bookmarkItems = data == null ? <BookmarkItem>[] : data.bookmarks;
+            final bookmarkItems =
+                data == null ? <BookmarkItem>[] : data.bookmarks;
 
             return ListView(
               padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
@@ -276,7 +277,7 @@ class _HomePageState extends State<HomePage> {
                 ),
                 const SizedBox(height: 24),
                 Text(
-                  '🔥 많이 본 말씀 Top 3 (즐겨찾기순)',
+                  '🔥 사람들이 많이 본 말씀 Top 3',
                   style: Theme.of(context)
                       .textTheme
                       .titleLarge

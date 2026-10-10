@@ -17,6 +17,14 @@ import 'local_profile_service.dart';
 import 'nas_api_client.dart';
 import 'pdf_cache_service.dart';
 
+enum DailyAlarmScheduleResult {
+  scheduled,
+  disabled,
+  notificationsPermissionDenied,
+  exactAlarmPermissionDenied,
+  failed,
+}
+
 /// Handles both foreground local notifications and FCM notifications.
 ///
 /// Firestore/NAS listeners cover changes while the app is open. FCM handles
@@ -30,12 +38,16 @@ class NotificationService {
   static const _deviceIdKey = 'notification_device_id';
   static const _channelId = 'wordcalendar_updates';
   static const _channelName = 'TheWordCalendar 업데이트';
+  static const _dailyAlarmChannelId = 'wordcalendar_daily_alarm';
+  static const _dailyAlarmPayload = 'daily_scripture';
+  static const _dailyAlarmChannelName = 'TheWordCalendar 매일 알림';
 
   final FlutterLocalNotificationsPlugin _local =
       FlutterLocalNotificationsPlugin();
   final LocalProfileService _profile = LocalProfileService();
   final NasApiClient _nas = NasApiClient.instance;
   final Random _random = Random.secure();
+  final ValueNotifier<DateTime?> dailyAlarmOpened = ValueNotifier(null);
 
   StreamSubscription<RemoteMessage>? _messageSubscription;
   StreamSubscription<String>? _tokenSubscription;
@@ -394,7 +406,14 @@ class NotificationService {
     const ios = DarwinInitializationSettings();
     await _local.initialize(
       settings: const InitializationSettings(android: android, iOS: ios),
+      onDidReceiveNotificationResponse: _handleNotificationResponse,
     );
+
+    final launchDetails = await _local.getNotificationAppLaunchDetails();
+    if (launchDetails?.didNotificationLaunchApp == true) {
+      final response = launchDetails?.notificationResponse;
+      if (response != null) _handleNotificationResponse(response);
+    }
 
     final androidPlugin = _local.resolvePlatformSpecificImplementation<
         AndroidFlutterLocalNotificationsPlugin>();
@@ -406,12 +425,26 @@ class NotificationService {
         importance: Importance.high,
       ),
     );
+    await androidPlugin?.createNotificationChannel(
+      const AndroidNotificationChannel(
+        _dailyAlarmChannelId,
+        _dailyAlarmChannelName,
+        description: 'TheWordCalendar daily reminder',
+        importance: Importance.high,
+      ),
+    );
     await androidPlugin?.requestNotificationsPermission();
     await _local
         .resolvePlatformSpecificImplementation<
             IOSFlutterLocalNotificationsPlugin>()
         ?.requestPermissions(alert: true, badge: true, sound: true);
     _localReady = true;
+  }
+
+  void _handleNotificationResponse(NotificationResponse response) {
+    if (response.payload == _dailyAlarmPayload || response.id == 1001) {
+      dailyAlarmOpened.value = DateTime.now();
+    }
   }
 
   Future<void> _showIfEnabled({
@@ -463,7 +496,7 @@ class NotificationService {
 
   String _safeDocumentId(String token) => token.replaceAll('/', '_');
 
-  Future<void> updateDailyAlarmSchedule({
+  Future<DailyAlarmScheduleResult> updateDailyAlarmSchedule({
     required bool enabled,
     required int hour,
     required int minute,
@@ -471,11 +504,34 @@ class NotificationService {
   }) async {
     const alarmId = 1001;
     try {
-      await _local.cancel(id: alarmId);
-      if (!enabled) return;
-
+      // Initialize the plugin before calling cancel/schedule. This also avoids
+      // a race when the user opens Settings just after the first app frame.
       if (!_localReady) {
         await _ensureLocalNotifications();
+      }
+      if (!enabled) {
+        await _local.cancel(id: alarmId);
+        return DailyAlarmScheduleResult.disabled;
+      }
+
+      final androidPlugin = _local.resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin>();
+      if (androidPlugin != null &&
+          !(await androidPlugin.areNotificationsEnabled() ?? false)) {
+        debugPrint(
+            'Daily alarm not scheduled: notifications permission denied.');
+        return DailyAlarmScheduleResult.notificationsPermissionDenied;
+      }
+      final iosPlugin = _local.resolvePlatformSpecificImplementation<
+          IOSFlutterLocalNotificationsPlugin>();
+      if (iosPlugin != null) {
+        final permissions = await iosPlugin.checkPermissions();
+        if (permissions == null ||
+            (!permissions.isEnabled && !permissions.isProvisionalEnabled)) {
+          debugPrint(
+              'Daily alarm not scheduled: notifications permission denied.');
+          return DailyAlarmScheduleResult.notificationsPermissionDenied;
+        }
       }
 
       if (!_timeZonesInitialized) {
@@ -485,13 +541,15 @@ class NotificationService {
       final timeZone = await FlutterTimezone.getLocalTimezone();
       tz.setLocalLocation(tz.getLocation(timeZone.identifier));
 
-      final androidPlugin = _local.resolvePlatformSpecificImplementation<
-          AndroidFlutterLocalNotificationsPlugin>();
       var exactAlarmsAllowed =
           await androidPlugin?.canScheduleExactNotifications() ?? true;
       if (!exactAlarmsAllowed && requestExactAlarmPermission) {
         exactAlarmsAllowed =
             await androidPlugin?.requestExactAlarmsPermission() ?? false;
+      }
+      if (!exactAlarmsAllowed) {
+        debugPrint('Daily alarm not scheduled: exact alarm permission denied.');
+        return DailyAlarmScheduleResult.exactAlarmPermissionDenied;
       }
 
       final now = tz.TZDateTime.now(tz.local);
@@ -521,8 +579,8 @@ class NotificationService {
         body: '오늘의 말씀과 묵상을 확인해보세요!',
         notificationDetails: const NotificationDetails(
           android: AndroidNotificationDetails(
-            _channelId,
-            _channelName,
+            _dailyAlarmChannelId,
+            _dailyAlarmChannelName,
             channelDescription: 'Daily alarm notification',
             importance: Importance.high,
             priority: Priority.high,
@@ -534,14 +592,22 @@ class NotificationService {
             presentSound: true,
           ),
         ),
-        androidScheduleMode: exactAlarmsAllowed
-            ? AndroidScheduleMode.exactAllowWhileIdle
-            : AndroidScheduleMode.inexact,
+        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
         matchDateTimeComponents: DateTimeComponents.time,
+        payload: _dailyAlarmPayload,
       );
+
+      final pending = await _local.pendingNotificationRequests();
+      if (!pending.any((request) => request.id == alarmId)) {
+        debugPrint('Daily alarm was not found in pending notifications.');
+        return DailyAlarmScheduleResult.failed;
+      }
+      debugPrint('Daily alarm scheduled for $scheduledDate (exact).');
+      return DailyAlarmScheduleResult.scheduled;
     } catch (error, stackTrace) {
       debugPrint('Daily alarm scheduling failed: $error');
       debugPrintStack(stackTrace: stackTrace);
+      return DailyAlarmScheduleResult.failed;
     }
   }
 
