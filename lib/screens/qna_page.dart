@@ -46,7 +46,8 @@ class _QnaPageState extends State<QnaPage> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-            content: Text('NAS에 연결되지 않아 질문을 등록하지 못했습니다. 다시 연결한 뒤 시도해 주세요.')),
+          content: Text('질문을 저장하지 못했습니다. 연결 상태를 확인한 뒤 다시 시도해 주세요.'),
+        ),
       );
     }
   }

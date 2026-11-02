@@ -144,13 +144,16 @@ class _AdminQnaPageState extends State<AdminQnaPage> {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
                         content: Text(
-                            'NAS에 연결되지 않아 답변을 저장하지 못했습니다. 다시 연결한 뒤 시도해 주세요.')),
+                            '답변을 저장하지 못했습니다. 연결 상태와 관리자 권한을 확인한 뒤 다시 시도해 주세요.')),
                   );
                   return;
                 }
 
                 if (!mounted || !dialogContext.mounted) return;
                 Navigator.pop(dialogContext);
+                // NAS 목록은 polling 스트림이므로 저장된 로컬 상태를
+                // 즉시 다시 읽도록 StreamBuilder를 갱신합니다.
+                setState(() {});
 
                 ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(content: Text('답변이 등록되었습니다.')));

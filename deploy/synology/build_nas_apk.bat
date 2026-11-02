@@ -10,7 +10,7 @@ echo Build a NAS-connected Android release APK.
 echo The user token will be embedded in the APK. Only share it with trusted users.
 set "NAS_BASE_URL="
 set "NAS_TOKEN="
-set /p "NAS_BASE_URL=Tailscale HTTPS base URL (example: https://nas-name.example.ts.net): "
+set /p "NAS_BASE_URL=HTTPS API base URL (example: https://api.example.com): "
 if "%NAS_BASE_URL%"=="" goto :missing_url
 
 echo.
@@ -30,7 +30,7 @@ if errorlevel 1 goto :copy_failed
 set "NAS_TOKEN="
 echo.
 echo NAS APK created: build\app\outputs\flutter-apk\wordcalendar-nas.apk
-echo Install it on a phone with Tailscale connected to the same tailnet.
+echo Install it on a phone and ensure it can reach the configured HTTPS API URL.
 pause
 exit /b 0
 
@@ -40,7 +40,7 @@ pause
 exit /b 1
 
 :missing_url
-echo Enter the NAS Tailscale HTTPS base URL.
+echo Enter the NAS HTTPS API base URL.
 pause
 exit /b 1
 

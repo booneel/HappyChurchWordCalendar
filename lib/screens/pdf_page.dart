@@ -178,9 +178,29 @@ class _PdfPageState extends State<PdfPage> {
 
           if (snapshot.hasError || snapshot.data == null) {
             return Center(
-              child: Text(
-                'PDF를 불러오지 못했습니다.\n${snapshot.error ?? ''}',
-                textAlign: TextAlign.center,
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.picture_as_pdf_outlined, size: 48),
+                    const SizedBox(height: 12),
+                    const Text(
+                      '\uC11C\uBC84 \uC624\uB958\uB85C PDF\uB97C \uBD88\uB7EC\uC624\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4.\n\uB098\uC911\uC5D0 \uB2E4\uC2DC \uC2DC\uB3C4\uD574 \uC8FC\uC138\uC694.',
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 16),
+                    FilledButton.icon(
+                      onPressed: () {
+                        setState(() {
+                          pdfFuture = cache.getCachedPdf(forceRefresh: true);
+                        });
+                      },
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('\uB2E4\uC2DC \uC2DC\uB3C4'),
+                    ),
+                  ],
+                ),
               ),
             );
           }
@@ -270,7 +290,7 @@ class _SinglePagePdfViewerState extends State<_SinglePagePdfViewer> {
         if (snapshot.hasError || snapshot.data == null) {
           return Center(
             child: Text(
-              'PDF 페이지를 표시하지 못했습니다.\n${snapshot.error ?? ''}',
+              '\uC11C\uBC84 \uC624\uB958\uB85C PDF\uB97C \uBD88\uB7EC\uC624\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4.\n\uB098\uC911\uC5D0 \uB2E4\uC2DC \uC2DC\uB3C4\uD574 \uC8FC\uC138\uC694.',
               textAlign: TextAlign.center,
             ),
           );
@@ -367,7 +387,7 @@ class _SinglePdfPageImageState extends State<_SinglePdfPageImage> {
         if (snapshot.hasError || snapshot.data == null) {
           return Center(
             child: Text(
-              '페이지를 표시하지 못했습니다.\n${snapshot.error ?? ''}',
+              '\uC11C\uBC84 \uC624\uB958\uB85C PDF\uB97C \uBD88\uB7EC\uC624\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4.\n\uB098\uC911\uC5D0 \uB2E4\uC2DC \uC2DC\uB3C4\uD574 \uC8FC\uC138\uC694.',
               textAlign: TextAlign.center,
               style: const TextStyle(color: Colors.white),
             ),

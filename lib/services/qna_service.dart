@@ -123,32 +123,32 @@ class QnaService {
       isReadByAdmin: false,
     );
 
-    // 1. 로컬 SharedPreferences에 먼저 저장
-    await _saveLocalItem(newItem);
-
-    // 2. NAS는 먼저 대기열에 기록해 앱이 종료되어도 재전송할 수 있게 합니다.
+    // 1. 서버 저장을 먼저 확인합니다. 실패한 질문을 성공한 것처럼
+    // 로컬 목록에 남기지 않아 관리자에게 미등록 질문으로 보이지 않게 합니다.
     if (BackendConfig.useNas) {
       await _nas.postJson('/api/qna', newItem.toJson());
-      await _saveLocalItem(newItem);
+      try {
+        await _saveLocalItem(newItem);
+      } catch (_) {
+        // 원격 저장이 성공했으면 로컬 캐시 오류가 제출 결과를 바꾸지 않습니다.
+      }
       return;
     }
 
-    await _saveLocalItem(newItem);
-
-    // 3. Firestore 서버 저장
+    await _db.collection(_collection).doc(id).set({
+      'title': title.trim(),
+      'content': content.trim(),
+      'authorName': authorName.trim().isEmpty ? '사용자' : authorName.trim(),
+      'authorDeviceId': authorDeviceId,
+      'notificationToken': notificationToken,
+      'createdAt': FieldValue.serverTimestamp(),
+      'isAnswered': false,
+      'isReadByAdmin': false,
+    });
     try {
-      await _db.collection(_collection).doc(id).set({
-        'title': title.trim(),
-        'content': content.trim(),
-        'authorName': authorName.trim().isEmpty ? '사용자' : authorName.trim(),
-        'authorDeviceId': authorDeviceId,
-        'notificationToken': notificationToken,
-        'createdAt': FieldValue.serverTimestamp(),
-        'isAnswered': false,
-        'isReadByAdmin': false,
-      });
+      await _saveLocalItem(newItem);
     } catch (_) {
-      // 오프라인 상태에서도 로컬 데이터 유지
+      // 원격 저장이 성공했으면 로컬 캐시 오류가 제출 결과를 바꾸지 않습니다.
     }
   }
 

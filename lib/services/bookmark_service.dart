@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'view_history_service.dart';
@@ -45,7 +46,8 @@ class BookmarkService {
 
   static const String _bookmarksKey = 'user_bookmarks_list_v1';
 
-  final FirebaseFirestore _db = FirebaseFirestore.instance;
+  FirebaseFirestore? get _db =>
+      Firebase.apps.isEmpty ? null : FirebaseFirestore.instance;
   final StreamController<List<BookmarkItem>> _bookmarksController =
       StreamController<List<BookmarkItem>>.broadcast();
   final StreamController<List<PageViewStat>> _topBookmarksController =
@@ -61,7 +63,9 @@ class BookmarkService {
     });
 
     try {
-      _db.collection('bookmark_stats').snapshots().listen(
+      final db = _db;
+      if (db == null) return;
+      db.collection('bookmark_stats').snapshots().listen(
         (snapshot) {
           for (final doc in snapshot.docs) {
             final data = doc.data();
@@ -148,7 +152,9 @@ class BookmarkService {
 
     // Firestore Sync
     try {
-      final docRef = _db.collection('bookmark_stats').doc(page.toString());
+      final db = _db;
+      if (db == null) return isAdded;
+      final docRef = db.collection('bookmark_stats').doc(page.toString());
       await docRef.set(
         {
           'page': page,
@@ -190,16 +196,19 @@ class BookmarkService {
     }
 
     try {
-      final snapshot = await _db.collection('bookmark_stats').get();
-      for (final doc in snapshot.docs) {
-        final data = doc.data();
-        final pageNum = (data['page'] as num?)?.toInt() ??
-            int.tryParse(doc.id) ??
-            0;
-        final count = (data['count'] as num?)?.toInt() ?? 0;
-        if (pageNum > 0) {
-          final local = statsMap[pageNum] ?? 0;
-          statsMap[pageNum] = max(local, count);
+      final db = _db;
+      if (db != null) {
+        final snapshot = await db.collection('bookmark_stats').get();
+        for (final doc in snapshot.docs) {
+          final data = doc.data();
+          final pageNum = (data['page'] as num?)?.toInt() ??
+              int.tryParse(doc.id) ??
+              0;
+          final count = (data['count'] as num?)?.toInt() ?? 0;
+          if (pageNum > 0) {
+            final local = statsMap[pageNum] ?? 0;
+            statsMap[pageNum] = max(local, count);
+          }
         }
       }
     } catch (_) {}

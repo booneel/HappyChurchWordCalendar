@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:pdfrx/pdfrx.dart' as pdfrx;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'backend_config.dart';
@@ -54,6 +55,15 @@ class PdfCacheService {
 
     final file = File('${cacheDir.path}/$_cacheFileName');
     final prefs = await SharedPreferences.getInstance();
+
+    // A file can exist even when a previous download was interrupted or the
+    // filesystem returned a damaged copy. Never treat existence as validity.
+    if (await file.exists() && !await _isUsablePdf(file)) {
+      await file.delete();
+      await prefs.remove(_lastCheckKey);
+      await prefs.remove(_generationKey);
+      _memoryFile = null;
+    }
 
     if (BackendConfig.useNas) {
       return _loadFromNas(file: file, prefs: prefs, forceRefresh: forceRefresh);
@@ -134,7 +144,8 @@ class PdfCacheService {
     }
 
     try {
-      final download = _nas.downloadPdf(file);
+      final candidate = File('${file.path}.candidate');
+      final download = _downloadAndReplaceNas(file, candidate);
       if (forceRefresh) {
         await download;
       } else {
@@ -159,15 +170,6 @@ class PdfCacheService {
     _loading = null;
     _memoryFile = null;
 
-    try {
-      final dir = await getApplicationSupportDirectory();
-      final cacheDir = Directory('${dir.path}/pdf_cache');
-      final file = File('${cacheDir.path}/$_cacheFileName');
-      if (await file.exists()) {
-        await file.delete();
-      }
-    } catch (_) {}
-
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_lastCheckKey);
     await prefs.remove(_generationKey);
@@ -189,10 +191,45 @@ class PdfCacheService {
   }
 
   Future<void> _download(Reference ref, File file) async {
-    if (await file.exists()) {
-      await file.delete();
+    final candidate = File('${file.path}.candidate');
+    try {
+      await ref.writeToFile(candidate);
+      if (!await _isUsablePdf(candidate)) {
+        throw const FormatException('다운로드한 PDF 파일이 손상되었습니다.');
+      }
+      await _replaceFile(candidate, file);
+    } finally {
+      if (await candidate.exists()) await candidate.delete();
     }
+  }
 
-    await ref.writeToFile(file);
+  Future<void> _downloadAndReplaceNas(File target, File candidate) async {
+    try {
+      await _nas.downloadPdf(candidate);
+      if (!await _isUsablePdf(candidate)) {
+        throw const FormatException('NAS에서 받은 PDF 파일이 손상되었습니다.');
+      }
+      await _replaceFile(candidate, target);
+    } finally {
+      if (await candidate.exists()) await candidate.delete();
+    }
+  }
+
+  Future<void> _replaceFile(File candidate, File target) async {
+    if (await target.exists()) await target.delete();
+    await candidate.rename(target.path);
+  }
+
+  Future<bool> _isUsablePdf(File file) async {
+    if (!await file.exists() || await file.length() < 8) return false;
+    pdfrx.PdfDocument? document;
+    try {
+      document = await pdfrx.PdfDocument.openFile(file.path);
+      return document.pages.isNotEmpty;
+    } catch (_) {
+      return false;
+    } finally {
+      await document?.dispose();
+    }
   }
 }
